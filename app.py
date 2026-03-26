@@ -22,38 +22,27 @@ def cargar_datos():
         df1 = pd.read_csv(url1)
         df2 = pd.read_csv(url2)
 
-        # Normalización extrema de nombres
+        # Normalización de nombres
         for d in [df1, df2]:
             d.columns = d.columns.str.strip().str.upper()
 
-        def normalizar(df_temp):
-            rename_map = {}
-            for col in df_temp.columns:
-                if "DISTANCIA" in col or "KM" in col: rename_map[col] = "KM"
-                # AMPLIAMOS LA BÚSQUEDA DE LITROS:
-                if "LITROS" in col or "LTS" in col or "CONSUMO" in col and "100" not in col: 
-                    rename_map[col] = "LITROS_CONSUMIDOS"
-                if "RALENTI" in col: rename_map[col] = "RALENTI_LTS"
-                if "100KM" in col: rename_map[col] = "L100KM"
-            return df_temp.rename(columns=rename_map)
-
-        df1 = normalizar(df1)
-        df2 = normalizar(df2)
-
-        # Cruce
+        # Cruce por FECHA y DOMINIO
         df_merged = pd.merge(df1, df2, on=["FECHA", "DOMINIO"], how="inner")
         
-        # SI FALLA, MOSTRAMOS LAS COLUMNAS DISPONIBLES PARA DEBUGGEAR
-        cols_necesarias = ["KM", "LITROS_CONSUMIDOS", "RALENTI_LTS"]
-        presentes = [c for c in cols_necesarias if c in df_merged.columns]
+        # --- MAPEO SEGÚN TU CAPTURA ---
+        # Renombramos las columnas para que el código las entienda
+        rename_dict = {
+            'KILOMETRAJE SATELITAL': 'KM',
+            'LITROS_CONSUMIDOS_X': 'LITROS_CONSUMIDOS', # Usamos la versión de telemetría
+            'EMISIONES (KG CO2)': 'EMISIONES',
+            'TIEMPO FUNCIONAMIENTO MOTOR (H:M)': 'TIEMPO_MOTOR'
+        }
+        df_merged = df_merged.rename(columns=rename_dict)
         
-        if len(presentes) < len(cols_necesarias):
-            st.error(f"⚠️ Error de columnas. Encontradas: {presentes}")
-            st.write("Columnas disponibles en el archivo:", list(df_merged.columns))
-            return pd.DataFrame()
-
-        df_merged = df_merged.dropna(subset=cols_necesarias)
-        return df_merged
+        # Filtramos solo lo que necesitamos
+        cols_finales = ["FECHA", "DOMINIO", "KM", "LITROS_CONSUMIDOS", "EMISIONES"]
+        return df_merged[cols_finales].dropna()
+        
     except Exception as e:
         st.error(f"Error: {e}")
         return pd.DataFrame()
@@ -61,19 +50,33 @@ def cargar_datos():
 df = cargar_datos()
 
 if not df.empty:
-    # --- MÉTRICAS ---
-    df["COSTO"] = df["LITROS_CONSUMIDOS"] * 1250 # Precio fijo para probar
+    # --- MÉTRICAS SUPERIORES ---
+    lts_tot = df["LITROS_CONSUMIDOS"].sum()
+    km_tot = df["KM"].sum()
+    co2_tot = df["EMISIONES"].sum()
     
     c1, c2, c3 = st.columns(3)
-    c1.metric("⛽ Litros Totales", f"{df['LITROS_CONSUMIDOS'].sum():,.0f} L")
-    c2.metric("💰 Costo Total", f"$ {df['COSTO'].sum():,.0f}")
-    c3.metric("🛣️ Km Totales", f"{df['KM'].sum():,.0f} km")
+    c1.metric("⛽ Litros Totales", f"{lts_tot:,.0f} L")
+    c2.metric("🛣️ Km Totales", f"{km_tot:,.0f} km")
+    c3.metric("🌿 CO2 Total", f"{co2_tot:,.0f} kg")
     
     st.divider()
-    st.subheader("📊 Consumo por Patente")
-    st.bar_chart(df.groupby("DOMINIO")["LITROS_CONSUMIDOS"].sum())
     
-    st.subheader("📋 Datos Cruzados")
+    # --- GRÁFICOS ---
+    col_l, col_r = st.columns(2)
+    
+    with col_l:
+        st.subheader("📊 Consumo por Patente")
+        st.bar_chart(df.groupby("DOMINIO")["LITROS_CONSUMIDOS"].sum())
+        
+    with col_r:
+        st.subheader("🌍 Emisiones por Patente")
+        st.bar_chart(df.groupby("DOMINIO")["EMISIONES"].sum())
+    
+    st.divider()
+    
+    # --- TABLA DE DATOS ---
+    st.subheader("📋 Detalle de Operación Validado")
     st.dataframe(df, use_container_width=True)
 else:
-    st.info("💡 Revisá arriba la lista de columnas disponibles para identificar cómo se llaman los litros en tu Excel.")
+    st.info("💡 Esperando coincidencia de datos entre las hojas de Google Sheets.")
