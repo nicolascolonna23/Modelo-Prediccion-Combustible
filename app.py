@@ -20,34 +20,41 @@ def cargar_datos():
         df2 = pd.read_csv(url2)
 
         def limpiar_tabla(temp_df):
+            # Limpiar nombres de columnas
             temp_df.columns = temp_df.columns.str.strip().str.upper()
+            
+            # Limpiar Patentes (Sacar espacios)
             if 'DOMINIO' in temp_df.columns:
                 temp_df['DOMINIO'] = temp_df['DOMINIO'].astype(str).str.replace(' ', '').str.upper()
-            if 'FECHA' in temp_df.columns:
-                temp_df['FECHA'] = pd.to_datetime(temp_df['FECHA'], errors='coerce').dt.date
             
-            # Limpieza de números (sacar puntos de miles y comas decimales si vienen como texto)
-            cols_numericas = ['KILOMETRAJE SATELITAL', 'LITROS CONSUMIDOS TELEMETRIA', 'LITROS_CONSUMIDOS', 'EMISIONES (KG CO2)']
-            for col in cols_numericas:
-                if col in temp_df.columns:
+            # Limpiar Números (sacar puntos de miles y comas decimales)
+            for col in temp_df.columns:
+                if any(x in col for x in ['KILOMETRAJE', 'LITROS', 'EMISIONES']):
                     temp_df[col] = pd.to_numeric(temp_df[col].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce').fillna(0)
             
+            # Renombrado estándar
             reemplazos = {
                 'KILOMETRAJE SATELITAL': 'KM',
-                'LITROS CONSUMIDOS TELEMETRIA': 'LITROS_FINAL',
-                'LITROS_CONSUMIDOS': 'LITROS_FINAL',
-                'EMISIONES (KG CO2)': 'CO2_FINAL'
+                'LITROS CONSUMIDOS TELEMETRIA': 'LITROS',
+                'LITROS_CONSUMIDOS': 'LITROS',
+                'EMISIONES (KG CO2)': 'CO2'
             }
             return temp_df.rename(columns=reemplazos)
 
         df1 = limpiar_tabla(df1)
         df2 = limpiar_tabla(df2)
 
-        # Cruce simplificado: solo por DOMINIO si la fecha te está dando problemas, 
-        # pero probemos con ambos primero
-        df_merged = pd.merge(df1, df2[['FECHA', 'DOMINIO', 'CO2_FINAL', 'MARCA']], on=["FECHA", "DOMINIO"], how="inner")
+        # CRUCE FLEXIBLE: Si el cruce por Fecha y Dominio falla, usamos solo Dominio
+        # Agrupamos df1 para tener totales por patente
+        df1_agrupado = df1.groupby('DOMINIO').agg({'KM': 'sum', 'LITROS': 'sum'}).reset_index()
         
-        return df_merged
+        # Agrupamos df2 para tener info de la unidad
+        columnas_df2 = [c for c in ['DOMINIO', 'MARCA', 'CO2'] if c in df2.columns]
+        df2_agrupado = df2.groupby('DOMINIO').agg({c: 'first' if c == 'MARCA' else 'sum' for c in columnas_df2 if c != 'DOMINIO'}).reset_index()
+
+        df_final = pd.merge(df1_agrupado, df2_agrupado, on="DOMINIO", how="inner")
+        
+        return df_final
     except Exception as e:
         st.error(f"Error técnico: {e}")
         return pd.DataFrame()
@@ -56,26 +63,33 @@ df = cargar_datos()
 
 if not df.empty:
     # --- MÉTRICAS ---
-    # Usamos sum() directo y aseguramos que sean floats
-    lts_val = float(df['LITROS_FINAL'].sum())
+    lts_val = float(df['LITROS'].sum())
     kms_val = float(df['KM'].sum())
-    co2_val = float(df['CO2_FINAL'].sum()) if 'CO2_FINAL' in df.columns else 0
     
     c1, c2, c3 = st.columns(3)
     c1.metric("⛽ Litros Totales", f"{lts_val:,.0f} L")
     c2.metric("🛣️ Km Totales", f"{kms_val:,.0f} km")
-    c3.metric("🌿 CO2 Total", f"{co2_val:,.0f} kg")
+    if 'CO2' in df.columns:
+        c3.metric("🌿 CO2 Total", f"{float(df['CO2'].sum()):,.0f} kg")
     
     st.divider()
 
     # --- GRÁFICOS ---
-    st.subheader("📊 Consumo por Patente")
-    chart_data = df.groupby("DOMINIO")["LITROS_FINAL"].sum().sort_values(ascending=False)
-    st.bar_chart(chart_data)
+    col_l, col_r = st.columns(2)
     
-    st.subheader("📋 Auditoría de Datos")
+    with col_l:
+        st.subheader("📊 Consumo por Patente")
+        st.bar_chart(df.set_index("DOMINIO")["LITROS"])
+        
+    with col_r:
+        if 'MARCA' in df.columns:
+            st.subheader("🚛 Consumo por Marca")
+            resumen_marca = df.groupby("MARCA")["LITROS"].sum()
+            st.bar_chart(resumen_marca)
+    
+    st.divider()
+    st.subheader("📋 Resumen Consolidado")
     st.dataframe(df, use_container_width=True)
 else:
-    st.warning("⚠️ No hay datos cruzados. Revisá que las fechas y patentes coincidan en ambas pestañas.")
-    # Debug para que veas qué está pasando
-    st.write("Si ves esto, es porque la FECHA o el DOMINIO no hacen 'match'.")
+    st.warning("⚠️ No se encontraron coincidencias de Patentes (DOMINIO) entre ambas hojas.")
+    st.info("Asegúrate de que los Dominios estén escritos igual (ej: AC078XC).")
