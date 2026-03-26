@@ -1,95 +1,115 @@
 import pandas as pd
 import streamlit as st
 import numpy as np
+import requests
+from bs4 import BeautifulSoup
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import PolynomialFeatures
+import json
+import warnings
+warnings.filterwarnings('ignore')
 
-# ─── CONFIG ──────────────────────────────────────────────
-st.set_page_config(page_title="Expreso Diemar - Consumo", page_icon="🚛", layout="wide")
+st.set_page_config(
+    page_title="Expreso Diemar — Predicción Combustible",
+    page_icon="🚛",
+    layout="wide",
+)
+
+LOGO_URL   = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/logo_diemar4.png"
+IVECO_URL  = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/S-Way-6x2-1.webp"
+SCANIA_URL = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/image.img.90.768.jpeg"
 
 st.markdown("""
 <style>
-.brand-card {
-  background: white; border-radius: 12px; padding: 20px 24px;
-  text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-  border-top: 4px solid #2563eb; margin-bottom: 8px;
-}
-.brand-name  { font-size: 1.3rem;  font-weight: 700; margin-bottom: 4px; }
-.brand-label { font-size: 0.78rem; color: #64748b;   margin-bottom: 8px; }
-.brand-value { font-size: 1.9rem;  font-weight: 800; color: #1e293b; }
-.brand-unit  { font-size: 0.82rem; color: #64748b; }
-.tbl-card    { background: white; border-radius: 12px; padding: 20px;
-               box-shadow: 0 2px 8px rgba(0,0,0,0.07); }
-.tbl-title   { font-size: 1rem; font-weight: 700; color: #1e293b; margin-bottom: 10px; }
-.tbl-row     { display: flex; align-items: center; padding: 7px 0;
-               border-bottom: 1px solid #f1f5f9; }
-.tbl-label   { min-width: 100px; font-size: 0.85rem; color: #334155; }
-.tbl-bar-bg  { flex: 1; background: #f1f5f9; border-radius: 4px; height: 7px;
-               margin: 0 10px; overflow: hidden; }
-.tbl-bar     { height: 7px; border-radius: 4px; }
-.tbl-val     { min-width: 55px; text-align: right; font-size: 0.85rem;
-               font-weight: 600; color: #1e293b; }
+  [data-testid="stAppViewContainer"] { background: #f0f4f8; }
+  .kpi-card {
+    background: white; border-radius: 14px; padding: 18px 22px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08); text-align: center;
+    border-left: 5px solid #2563eb; margin-bottom: 6px;
+  }
+  .kpi-label { font-size: 0.78rem; color: #64748b; font-weight: 600;
+               text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+  .kpi-value { font-size: 2rem; font-weight: 800; color: #0f172a; line-height:1.1; }
+  .kpi-sub   { font-size: 0.75rem; color: #94a3b8; margin-top: 4px; }
+  .kpi-red   { border-left-color: #ef4444; }
+  .kpi-green { border-left-color: #22c55e; }
+  .kpi-amber { border-left-color: #f59e0b; }
+  .kpi-purple{ border-left-color: #a855f7; }
+  .sec-title { font-size: 1.1rem; font-weight: 700; color: #1e293b;
+               border-left: 4px solid #2563eb; padding-left: 10px; margin: 18px 0 10px; }
+  .pred-card {
+    background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
+    border-radius: 14px; padding: 20px; color: white; margin-bottom: 8px;
+    box-shadow: 0 4px 15px rgba(37,99,235,0.3);
+  }
+  .pred-month { font-size: 0.8rem; opacity: .8; margin-bottom: 4px; }
+  .pred-value { font-size: 1.8rem; font-weight: 800; }
+  .pred-unit  { font-size: 0.75rem; opacity: .7; }
+  .truck-card {
+    background: white; border-radius: 14px; overflow: hidden;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08); margin-bottom: 10px;
+  }
+  .truck-img  { width: 100%; height: 170px; object-fit: cover; }
+  .truck-body { padding: 14px 16px; }
+  .price-badge {
+    background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px;
+    padding: 8px 14px; display: inline-block; font-size: 0.85rem;
+    color: #92400e; font-weight: 600;
+  }
+  .rank-row { display:flex; align-items:center; padding: 8px 0;
+              border-bottom: 1px solid #f1f5f9; }
+  .rank-num { width:28px; font-weight:700; font-size:.9rem; color:#64748b; }
+  .rank-dom { flex:1; font-size:.88rem; color:#1e293b; font-weight:600; }
+  .rank-val { font-size:.88rem; font-weight:700; }
+  .rank-bar-bg { width:80px; height:6px; background:#f1f5f9; border-radius:3px;
+                 margin:0 10px; overflow:hidden; }
+  .rank-bar { height:6px; border-radius:3px; }
 </style>
 """, unsafe_allow_html=True)
 
-# ─── FUENTE DE DATOS ─────────────────────────────────────
+# FUENTE DE DATOS
 BASE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR35NkYPtJrOrdYHLGUH7GIW93s5cPAqQ0zEk5fP1c3gvErwbUW7HJ2OeWBYaBVsYKVmCf0yhLvs6eG/pub?output=csv"
-GID_TEL  = "1044040871"
+GID_TEL  = "0"
 GID_UNID = "882343299"
 URL_TEL  = f"{BASE_URL}&gid={GID_TEL}"
 URL_UNID = f"{BASE_URL}&gid={GID_UNID}"
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def cargar_datos():
     try:
         df1 = pd.read_csv(URL_TEL)
         df2 = pd.read_csv(URL_UNID)
 
         def limpiar(df):
-            # Normalizar nombres de columnas a string, limpiar y mayusculas
             df.columns = [str(c).strip().upper() for c in df.columns]
-
-            # Eliminar columnas duplicadas (quedarse con la primera)
             df = df.loc[:, ~df.columns.duplicated()]
-
             cm = {}
             for c in df.columns:
-                if "DOMINIO" in c or "PATENTE" in c:
-                    cm[c] = "DOMINIO"
-                elif "LITROS" in c or "CONSUMID" in c:
-                    cm[c] = "LITROS"
-                elif "DISTANCIA" in c or "KM" in c or "KILOMETR" in c:
-                    cm[c] = "KM"
-                elif "CO2" in c or "EMISION" in c:
-                    cm[c] = "CO2"
-                elif "MARCA" in c:
-                    cm[c] = "MARCA"
-                elif "TAG" in c or "RUTA" in c or "SITE" in c:
-                    cm[c] = "TAG"
-                elif "FECHA" in c or "DATE" in c:
-                    cm[c] = "FECHA"
-                elif "L/100" in c or "CONSUMO C" in c:
-                    cm[c] = "L100KM"
+                if "DOMINIO" in c or "PATENTE" in c:        cm[c] = "DOMINIO"
+                elif "LITROS" in c or "CONSUMID" in c:      cm[c] = "LITROS"
+                elif "DISTANCIA" in c or c == "KM" or "KILOMETR" in c: cm[c] = "KM"
+                elif "CO2" in c or "EMISION" in c:          cm[c] = "CO2"
+                elif "MARCA" in c:                          cm[c] = "MARCA"
+                elif "TAG" in c:                            cm[c] = "TAG"
+                elif "FECHA" in c or "DATE" in c:           cm[c] = "FECHA"
+                elif "L/100" in c or "CONSUMO C" in c:      cm[c] = "L100KM"
+                elif "RALENT" in c:                         cm[c] = "RALENTI"
+                elif "TIEMPO" in c and "MOTOR" in c:        cm[c] = "TIEMPO_MOTOR"
             df = df.rename(columns=cm)
-
-            # Eliminar duplicados que pueden aparecer tras el rename
             df = df.loc[:, ~df.columns.duplicated()]
-
             if "DOMINIO" in df.columns:
                 df["DOMINIO"] = df["DOMINIO"].astype(str).str.strip().str.upper()
-
-            for col in ["LITROS", "KM", "CO2", "L100KM"]:
+            for col in ["LITROS", "KM", "CO2", "L100KM", "RALENTI"]:
                 if col in df.columns:
                     serie = df[col]
-                    # Si por alguna razon es DataFrame, tomar la primera columna
                     if isinstance(serie, pd.DataFrame):
                         serie = serie.iloc[:, 0]
                     serie = (serie.astype(str)
                              .str.replace(".", "", regex=False)
                              .str.replace(",", ".", regex=False))
                     df[col] = pd.to_numeric(serie, errors="coerce").fillna(0)
-
             if "FECHA" in df.columns:
                 df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce", dayfirst=True)
-
             return df
 
         df1 = limpiar(df1)
@@ -98,158 +118,334 @@ def cargar_datos():
         if "L100KM" not in df1.columns and "LITROS" in df1.columns and "KM" in df1.columns:
             df1["L100KM"] = (df1["LITROS"] / df1["KM"].replace(0, np.nan) * 100).round(2)
 
-        extra = [c for c in ["DOMINIO", "MARCA", "CO2", "TAG"] if c in df2.columns]
-        if extra:
-            df2r = df2[extra].groupby("DOMINIO").first().reset_index()
-            df1 = pd.merge(df1, df2r, on="DOMINIO", how="left", suffixes=("", "_y"))
-            for col in ["MARCA", "CO2", "TAG"]:
-                if f"{col}_y" in df1.columns:
-                    df1[col] = df1[col].combine_first(df1[f"{col}_y"])
-                    df1.drop(columns=[f"{col}_y"], inplace=True)
-
-        return df1
+        extra = [c for c in ["DOMINIO", "CO2", "RALENTI"] if c in df2.columns]
+        if len(extra) > 1:
+            df2r = df2[extra].groupby("DOMINIO").sum(numeric_only=True).reset_index()
+            df1 = pd.merge(df1, df2r, on="DOMINIO", how="left", suffixes=("", "_u"))
+            for col in ["CO2", "RALENTI"]:
+                if f"{col}_u" in df1.columns:
+                    df1[col] = df1[col].combine_first(df1[f"{col}_u"])
+                    df1.drop(columns=[f"{col}_u"], inplace=True)
+        return df1, df2
     except Exception as e:
-        st.error(f"Error: {e}")
-        return pd.DataFrame()
+        st.error(f"Error cargando datos: {e}")
+        return pd.DataFrame(), pd.DataFrame()
 
-df_raw = cargar_datos()
+@st.cache_data(ttl=3600)
+def obtener_precio_gasoil():
+    try:
+        import re
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        r = requests.get("https://www.surtidores.com.ar/precios/", headers=headers, timeout=8)
+        soup = BeautifulSoup(r.text, "html.parser")
+        texto = soup.get_text(separator=" ")
+        matches = re.findall(r'[Gg]as[aoi][io]l[^\d]*(\d{3,4}[.,]\d{0,2})', texto[:8000])
+        if matches:
+            precio = float(matches[0].replace(",", "."))
+            if 500 < precio < 5000:
+                return precio, "surtidores.com.ar"
+    except Exception:
+        pass
+    return 1420.0, "referencia estimada"
+
+# CARGA
+with st.spinner('Cargando telemetria...'):
+    df_raw, df_unid = cargar_datos()
 
 if df_raw.empty:
-    st.warning("No se pudieron cargar los datos.")
+    st.warning('No se pudieron cargar los datos.')
     st.stop()
 
-# ─── HEADER ──────────────────────────────────────────────
-st.markdown("""
-<div style="background:#0f172a;padding:14px 24px;border-radius:10px;margin-bottom:20px;
-            display:flex;align-items:center;gap:12px;">
-  <span style="font-size:1.6rem">🚛</span>
-  <span style="color:white;font-size:1.25rem;font-weight:700">
-    Expreso Diemar — Dashboard de Consumo de Combustible
-  </span>
-</div>
-""", unsafe_allow_html=True)
+precio_gasoil, precio_fuente = obtener_precio_gasoil()
 
-# ─── FILTRO DE FECHA ─────────────────────────────────────
+# HEADER
+col_logo, col_title = st.columns([1, 5])
+with col_logo:
+    st.image(LOGO_URL, width=130)
+with col_title:
+    st.markdown("""
+    <div style='padding:8px 0;'>
+      <div style='font-size:1.6rem;font-weight:800;color:#0f172a;'>
+        Expreso Diemar &mdash; Prediccion de Consumo de Combustible
+      </div>
+      <div style='font-size:.9rem;color:#64748b;margin-top:4px;'>
+        Telemetria flota completa &middot; Modelo predictivo ML &middot; Actualizacion automatica
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+st.markdown(
+    f'<div style="margin-bottom:12px;">'
+    f'<span class="price-badge">&#9981; Precio gasoil referencia: <b>${precio_gasoil:,.0f}/L</b></span>'
+    f'&nbsp;&nbsp;<span style="font-size:.75rem;color:#94a3b8;">Fuente: {precio_fuente}</span></div>',
+    unsafe_allow_html=True
+)
+
+# FILTROS
 df = df_raw.copy()
-if "FECHA" in df.columns and df["FECHA"].notna().any():
-    f1, f2, _ = st.columns([1, 1, 2])
-    fmin = df["FECHA"].min().date()
-    fmax = df["FECHA"].max().date()
-    desde = f1.date_input("Desde", value=fmin, min_value=fmin, max_value=fmax)
-    hasta = f2.date_input("Hasta", value=fmax, min_value=fmin, max_value=fmax)
-    df = df[(df["FECHA"].dt.date >= desde) & (df["FECHA"].dt.date <= hasta)]
+if 'FECHA' in df.columns and df['FECHA'].notna().any():
+    with st.expander('Filtros', expanded=True):
+        fc1, fc2, fc3 = st.columns([1, 1, 2])
+        fmin = df['FECHA'].min().date()
+        fmax = df['FECHA'].max().date()
+        desde = fc1.date_input('Desde', value=fmin, min_value=fmin, max_value=fmax)
+        hasta = fc2.date_input('Hasta', value=fmax, min_value=fmin, max_value=fmax)
+        marcas_disp = sorted(df['MARCA'].dropna().unique().tolist()) if 'MARCA' in df.columns else []
+        marcas_sel  = fc3.multiselect('Marca', marcas_disp, default=marcas_disp)
+        df = df[(df['FECHA'].dt.date >= desde) & (df['FECHA'].dt.date <= hasta)]
+        if marcas_sel and 'MARCA' in df.columns:
+            df = df[df['MARCA'].isin(marcas_sel)]
     if df.empty:
-        st.warning("Sin datos para el período seleccionado.")
+        st.warning('Sin datos para los filtros seleccionados.')
         st.stop()
 
-st.divider()
+df['MES_PERIODO'] = df['FECHA'].dt.to_period('M')
+df['MES_NUM'] = (df['FECHA'].dt.year - df['FECHA'].dt.year.min()) * 12 + df['FECHA'].dt.month
 
-# ─── HELPERS ─────────────────────────────────────────────
-def color_bar(val, vmin, vmax):
-    if vmax == vmin: return "#f59e0b"
-    p = (val - vmin) / (vmax - vmin)
-    return "#22c55e" if p <= 0.33 else ("#f59e0b" if p <= 0.66 else "#ef4444")
+# KPIs
+st.markdown('<div class="sec-title">Metricas Globales de la Flota</div>', unsafe_allow_html=True)
 
-def tabla_html(rows_df, col_label, col_val, titulo):
-    if rows_df.empty:
-        return f'<div class="tbl-card"><div class="tbl-title">🔥 {titulo}</div><p style="color:#94a3b8">Sin datos</p></div>'
-    vmin, vmax = rows_df[col_val].min(), rows_df[col_val].max()
-    html = f'<div class="tbl-card"><div class="tbl-title">🔥 {titulo}</div>'
-    html += '<div style="display:flex;justify-content:space-between;font-size:.73rem;color:#94a3b8;margin-bottom:4px"><span>Unidad</span><span>L/100km</span></div>'
-    for _, r in rows_df.iterrows():
-        v   = r[col_val]
-        pct = int((v - vmin) / (vmax - vmin) * 100) if vmax != vmin else 50
-        col = color_bar(v, vmin, vmax)
-        html += f"""<div class="tbl-row">
-  <div class="tbl-label">{r[col_label]}</div>
-  <div class="tbl-bar-bg"><div class="tbl-bar" style="width:{pct}%;background:{col}"></div></div>
-  <div class="tbl-val">{v:.2f}</div></div>"""
-    html += "</div>"
-    return html
+lts_total  = df['LITROS'].sum() if 'LITROS' in df.columns else 0
+kms_total  = df['KM'].sum()     if 'KM'     in df.columns else 0
+co2_total  = df['CO2'].sum()    if 'CO2'    in df.columns else 0
+l100_prom  = round(lts_total / kms_total * 100, 2) if kms_total > 0 else 0
+costo_est  = lts_total * precio_gasoil
+n_unidades = df['DOMINIO'].nunique() if 'DOMINIO' in df.columns else 0
+ralenti_total = df['RALENTI'].sum() if 'RALENTI' in df.columns else 0
 
-# ─── TARJETAS POR MARCA ──────────────────────────────────
-st.markdown("#### Consumo promedio por marca")
-MARCAS_ORD = ["SCANIA", "IVECO", "MERCEDES", "VOLKSWAGEN", "MAN"]
-if "MARCA" in df.columns and "L100KM" in df.columns:
-    md = df[df["L100KM"] > 0].groupby("MARCA")["L100KM"].mean().round(2)
-    mostrar  = [m for m in MARCAS_ORD if m in md.index]
-    mostrar += [m for m in md.index if m not in MARCAS_ORD]
-    mostrar  = mostrar[:4]
-    cols = st.columns(len(mostrar) if mostrar else 1)
-    for i, m in enumerate(mostrar):
-        cols[i].markdown(f"""<div class="brand-card">
-  <div class="brand-name">{m}</div>
-  <div class="brand-label">Consumo promedio flota</div>
-  <div class="brand-value">{md[m]:.2f}<span class="brand-unit"> ltr/100</span></div>
-</div>""", unsafe_allow_html=True)
+meses_df = df.groupby('MES_PERIODO').agg(
+    LITROS=('LITROS', 'sum'), KM=('KM', 'sum')
+).reset_index().sort_values('MES_PERIODO')
+meses_df['L100'] = (meses_df['LITROS'] / meses_df['KM'].replace(0, np.nan) * 100).round(2)
+
+if len(meses_df) >= 2:
+    delta_l100 = meses_df['L100'].iloc[-1] - meses_df['L100'].iloc[-2]
+    delta_txt  = f"{'▲' if delta_l100>0 else '▼'} {abs(delta_l100):.2f} vs mes anterior"
+    delta_col  = 'kpi-red' if delta_l100 > 0 else 'kpi-green'
 else:
-    st.info("Sin columna MARCA — necesaria para las tarjetas por marca.")
+    delta_txt = ''
+    delta_col = ''
 
-st.markdown("<br>", unsafe_allow_html=True)
+k1, k2, k3, k4, k5, k6 = st.columns(6)
 
-# ─── TRES TABLAS ─────────────────────────────────────────
-c1, c2, c3 = st.columns(3)
+def kpi(container, color, label, value, sub=''):
+    container.markdown(
+        f'<div class="kpi-card {color}">'
+        f'<div class="kpi-label">{label}</div>'
+        f'<div class="kpi-value">{value}</div>'
+        f'<div class="kpi-sub">{sub}</div>'
+        f'</div>', unsafe_allow_html=True)
 
-with c1:
-    if "L100KM" in df.columns:
-        t1 = (df[df["L100KM"] > 0]
-              .groupby("DOMINIO")["L100KM"]
-              .mean().round(2).reset_index()
-              .sort_values("L100KM").head(12))
-        st.markdown(tabla_html(t1, "DOMINIO", "L100KM", "Consumo por camión"),
-                    unsafe_allow_html=True)
-
-with c2:
-    if "TAG" in df.columns and "L100KM" in df.columns:
-        t2 = (df[df["L100KM"] > 0]
-              .groupby("TAG")["L100KM"]
-              .mean().round(2).reset_index()
-              .sort_values("L100KM"))
-        st.markdown(tabla_html(t2, "TAG", "L100KM", "Consumo por ruta / TAG"),
-                    unsafe_allow_html=True)
-    elif "FECHA" in df.columns and "LITROS" in df.columns and "KM" in df.columns:
-        df["MES"] = df["FECHA"].dt.strftime("%b %Y")
-        mes_list = []
-        for mes, g in df.groupby("MES"):
-            km_sum = g["KM"].sum()
-            l100 = round(g["LITROS"].sum() / km_sum * 100, 2) if km_sum > 0 else 0
-            mes_list.append({"MES": mes, "L100KM": l100})
-        t2 = pd.DataFrame(mes_list)
-        st.markdown(tabla_html(t2, "MES", "L100KM", "Consumo por mes"),
-                    unsafe_allow_html=True)
-    else:
-        st.info("Sin datos de ruta / TAG")
-
-with c3:
-    if "KM" in df.columns and "L100KM" in df.columns:
-        dfk  = df[df["KM"] > 0].copy()
-        bins   = [0, 5000, 10000, 15000, 20000, 999999]
-        labels = ["0-5k km", "5k-10k km", "10k-15k km", "15k-20k km", "+20k km"]
-        dfk["RANGO"] = pd.cut(dfk["KM"], bins=bins, labels=labels, right=True)
-        t3 = (dfk[dfk["L100KM"] > 0]
-              .groupby("RANGO", observed=True)["L100KM"]
-              .mean().round(2).reset_index().dropna())
-        t3.columns = ["RANGO", "L100KM"]
-        st.markdown(tabla_html(t3, "RANGO", "L100KM", "Consumo por rango de km"),
-                    unsafe_allow_html=True)
+kpi(k1, '',          '&#9981; Litros totales',    f'{lts_total:,.0f}',     'litros consumidos')
+kpi(k2, '',          '&#128739; KM recorridos',   f'{kms_total:,.0f}',     'kilometros')
+kpi(k3, delta_col,   '&#128202; L/100km flota',   f'{l100_prom:.2f}',      delta_txt)
+kpi(k4, 'kpi-amber', '&#128176; Costo estimado',  f'${costo_est/1e6:.1f}M', f'@ ${precio_gasoil:,.0f}/L')
+kpi(k5, 'kpi-purple','&#127807; CO2 emitido',     f'{co2_total/1000:.1f}t', 'toneladas CO2')
+kpi(k6, 'kpi-green', '&#128666; Unidades activas',f'{n_unidades}',          'dominios unicos')
 
 st.divider()
 
-# ─── KPIs GLOBALES ───────────────────────────────────────
-k1, k2, k3, k4 = st.columns(4)
-lts  = df["LITROS"].sum() if "LITROS" in df.columns else 0
-kms  = df["KM"].sum()     if "KM"     in df.columns else 0
-co2  = df["CO2"].sum()    if "CO2"    in df.columns else 0
-l100 = round(lts / kms * 100, 2) if kms > 0 else 0
+# TARJETAS IVECO / SCANIA
+st.markdown('<div class="sec-title">Rendimiento por Marca Principal</div>', unsafe_allow_html=True)
 
-k1.metric("⛽ Litros totales",    f"{lts:,.0f} L")
-k2.metric("🛣️ Km totales",        f"{kms:,.0f} km")
-k3.metric("📊 L/100km promedio",  f"{l100:.2f}")
-k4.metric("🌿 CO₂ total",         f"{co2:,.0f} kg")
+def stats_marca(marca):
+    sub = df[df['MARCA'].str.upper() == marca.upper()] if 'MARCA' in df.columns else pd.DataFrame()
+    if sub.empty:
+        return {'l100': 0, 'lts': 0, 'kms': 0, 'n': 0, 'co2': 0, 'ralenti': 0}
+    lts = sub['LITROS'].sum()
+    kms = sub['KM'].sum()
+    return {
+        'l100': round(lts / kms * 100, 2) if kms > 0 else 0,
+        'lts': lts, 'kms': kms,
+        'n': sub['DOMINIO'].nunique(),
+        'co2': sub['CO2'].sum() if 'CO2' in sub.columns else 0,
+        'ralenti': sub['RALENTI'].sum() if 'RALENTI' in sub.columns else 0
+    }
 
-with st.expander("📋 Ver datos completos"):
-    cols_s = [c for c in ["DOMINIO","MARCA","TAG","FECHA","KM","LITROS","L100KM","CO2"]
+tc1, tc2 = st.columns(2)
+for col_t, marca, img_url, color, modelo in [
+    (tc1, 'IVECO',  IVECO_URL,  '#2563eb', 'S-Way 6x2'),
+    (tc2, 'SCANIA', SCANIA_URL, '#dc2626', 'Serie R/S')
+]:
+    s = stats_marca(marca)
+    with col_t:
+        st.image(img_url, use_container_width=True)
+        sub_col1, sub_col2, sub_col3 = st.columns(3)
+        sub_col1.metric(f'{marca} - L/100km', f"{s['l100']:.1f}")
+        sub_col2.metric('Unidades',           f"{s['n']}")
+        sub_col3.metric('Litros totales',     f"{s['lts']:,.0f}")
+        st.caption(f"Modelo: {modelo} | {s['kms']:,.0f} km | CO2: {s['co2']/1000:.1f}t")
+
+st.divider()
+
+# MODELO PREDICTIVO
+st.markdown('<div class="sec-title">Modelo Predictivo &mdash; Consumo Proximos 3 Meses</div>', unsafe_allow_html=True)
+
+hist = meses_df[meses_df['KM'] > 0].copy()
+hist['T'] = range(len(hist))
+
+pred_col1, pred_col2 = st.columns([3, 2])
+
+with pred_col1:
+    if len(hist) >= 4:
+        X = hist['T'].values.reshape(-1, 1)
+        y_l100 = hist['L100'].values
+        y_lts  = hist['LITROS'].values
+
+        poly = PolynomialFeatures(degree=2)
+        Xp   = poly.fit_transform(X)
+        model_l100 = LinearRegression().fit(Xp, y_l100)
+        model_lts  = LinearRegression().fit(Xp, y_lts)
+
+        r2_l100 = model_l100.score(Xp, y_l100)
+
+        t_max   = hist['T'].max()
+        t_fut   = np.array([t_max+1, t_max+2, t_max+3]).reshape(-1, 1)
+        Xf      = poly.transform(t_fut)
+        pred_l100 = np.clip(model_l100.predict(Xf), 0, 100)
+        pred_lts  = np.clip(model_lts.predict(Xf),  0, None)
+
+        ultimo_periodo = hist['MES_PERIODO'].iloc[-1]
+        meses_fut = [(ultimo_periodo + i + 1).strftime('%b %Y') for i in range(3)]
+
+        st.caption(f'Modelo de regresion polinomial grado 2 | R2 = {r2_l100:.3f} | Entrenado con {len(hist)} meses de datos')
+
+        pc1, pc2, pc3 = st.columns(3)
+        for c, mes, l100_p, lts_p in zip([pc1, pc2, pc3], meses_fut, pred_l100, pred_lts):
+            costo_p = lts_p * precio_gasoil
+            c.metric(
+                label=f'Prediccion {mes}',
+                value=f'{l100_p:.2f} L/100km',
+                delta=f'{lts_p:,.0f} L | ${costo_p/1e6:.2f}M'
+            )
+
+        # Grafico con st.line_chart
+        import io
+        hist_chart = hist[['MES_PERIODO', 'L100']].copy()
+        hist_chart['MES_PERIODO'] = hist_chart['MES_PERIODO'].astype(str)
+
+        # Armar DataFrame para visualizacion
+        all_labels  = [str(p) for p in hist['MES_PERIODO']] + meses_fut
+        all_hist    = hist['L100'].tolist() + [None, None, None]
+        all_pred_partial = [None] * (len(hist) - 1) + [float(hist['L100'].iloc[-1])] + [float(v) for v in pred_l100]
+        chart_df = pd.DataFrame({
+            'Mes': all_labels,
+            'Historico': all_hist,
+            'Prediccion': all_pred_partial
+        }).set_index('Mes')
+        st.line_chart(chart_df, use_container_width=True)
+
+    else:
+        st.info('Se necesitan al menos 4 meses de datos para el modelo predictivo.')
+
+with pred_col2:
+    st.markdown('**TOP 10 Unidades mas eficientes (menor L/100km)**')
+    if 'DOMINIO' in df.columns and 'L100KM' in df.columns:
+        rank = (df[df['L100KM'] > 0]
+                .groupby('DOMINIO')['L100KM']
+                .mean().round(2).reset_index()
+                .sort_values('L100KM').head(10))
+        vmin = rank['L100KM'].min()
+        vmax = rank['L100KM'].max()
+        rank_html = '<div style="background:white;border-radius:12px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.07);">'
+        rank_html += '<div style="font-size:.72rem;display:flex;justify-content:space-between;color:#94a3b8;margin-bottom:6px;"><span>Unidad</span><span>L/100km</span></div>'
+        for i, (_, r) in enumerate(rank.iterrows(), 1):
+            v   = r['L100KM']
+            pct = int((v - vmin) / (vmax - vmin) * 100) if vmax != vmin else 50
+            col_b = '#22c55e' if i <= 3 else ('#f59e0b' if i <= 6 else '#ef4444')
+            rank_html += f'<div class="rank-row">'
+            rank_html += f'<div class="rank-num">#{i}</div>'
+            rank_html += f'<div class="rank-dom">{r["DOMINIO"]}</div>'
+            rank_html += f'<div class="rank-bar-bg"><div class="rank-bar" style="width:{pct}%;background:{col_b}"></div></div>'
+            rank_html += f'<div class="rank-val" style="color:{col_b}">{v:.2f}</div></div>'
+        rank_html += '</div>'
+        st.markdown(rank_html, unsafe_allow_html=True)
+
+    st.markdown('<br>', unsafe_allow_html=True)
+    st.markdown('**TOP 10 Unidades MENOS eficientes**')
+    if 'DOMINIO' in df.columns and 'L100KM' in df.columns:
+        rank_worst = (df[df['L100KM'] > 0]
+                      .groupby('DOMINIO')['L100KM']
+                      .mean().round(2).reset_index()
+                      .sort_values('L100KM', ascending=False).head(10))
+        st.dataframe(rank_worst, use_container_width=True, hide_index=True)
+
+st.divider()
+
+# ANALISIS DETALLADO
+st.markdown('<div class="sec-title">Analisis Detallado</div>', unsafe_allow_html=True)
+
+tab1, tab2, tab3, tab4 = st.tabs(['Por Ruta/TAG', 'Por Vehiculo', 'Evolucion Mensual', 'Ralenti y CO2'])
+
+with tab1:
+    if 'TAG' in df.columns and 'L100KM' in df.columns:
+        t_tag = (
+            df[df['L100KM'] > 0].groupby('TAG')
+            .agg(L100KM=('L100KM','mean'), LITROS=('LITROS','sum'), KM=('KM','sum'), UNIDADES=('DOMINIO','nunique'))
+            .round(2).reset_index().sort_values('L100KM')
+        )
+        t_tag['COSTO_M$'] = (t_tag['LITROS'] * precio_gasoil / 1e6).round(2)
+        t_tag.columns = ['Ruta/TAG', 'L/100km', 'Litros', 'KM', 'Unidades', 'Costo est. M$']
+        st.dataframe(t_tag, use_container_width=True, hide_index=True)
+    else:
+        st.info('No hay columna TAG disponible.')
+
+with tab2:
+    if 'DOMINIO' in df.columns:
+        grp_cols = ['DOMINIO', 'MARCA'] if 'MARCA' in df.columns else ['DOMINIO']
+        t_veh = (
+            df[df['L100KM'] > 0].groupby(grp_cols)
+            .agg(L100KM=('L100KM','mean'), LITROS=('LITROS','sum'), KM=('KM','sum'), MESES=('MES_PERIODO','nunique'))
+            .round(2).reset_index().sort_values('L100KM')
+        )
+        t_veh['COSTO_M$'] = (t_veh['LITROS'] * precio_gasoil / 1e6).round(2)
+        st.dataframe(t_veh, use_container_width=True, hide_index=True, height=420)
+
+with tab3:
+    c_ev1, c_ev2 = st.columns(2)
+    with c_ev1:
+        st.markdown('**Litros consumidos por mes**')
+        if not meses_df.empty:
+            ms = meses_df.copy()
+            ms['MES_PERIODO'] = ms['MES_PERIODO'].astype(str)
+            st.bar_chart(ms.set_index('MES_PERIODO')['LITROS'], use_container_width=True)
+    with c_ev2:
+        st.markdown('**Eficiencia L/100km por mes**')
+        if not meses_df.empty:
+            ms2 = meses_df.copy()
+            ms2['MES_PERIODO'] = ms2['MES_PERIODO'].astype(str)
+            st.line_chart(ms2.set_index('MES_PERIODO')['L100'], use_container_width=True)
+    if len(meses_df) >= 2:
+        ms3 = meses_df.copy()
+        ms3['MES_PERIODO'] = ms3['MES_PERIODO'].astype(str)
+        ms3['Costo_M$'] = (ms3['LITROS'] * precio_gasoil / 1e6).round(2)
+        st.markdown('**Costo estimado por mes**')
+        st.bar_chart(ms3.set_index('MES_PERIODO')['Costo_M$'], use_container_width=True)
+
+with tab4:
+    has_env = ('RALENTI' in df.columns and df['RALENTI'].sum() > 0) or ('CO2' in df.columns and df['CO2'].sum() > 0)
+    if has_env:
+        agg_dict = {}
+        if 'CO2' in df.columns:     agg_dict['CO2']     = ('CO2',     'sum')
+        if 'RALENTI' in df.columns: agg_dict['RALENTI']  = ('RALENTI', 'sum')
+        t_env = df.groupby('DOMINIO').agg(**agg_dict).round(2).reset_index()
+        if 'CO2' in t_env.columns:
+            t_env = t_env.sort_values('CO2', ascending=False)
+        st.dataframe(t_env.head(30), use_container_width=True, hide_index=True)
+        e1, e2 = st.columns(2)
+        if 'RALENTI' in df.columns and df['RALENTI'].sum() > 0:
+            e1.metric('Litros en Ralenti', f"{df['RALENTI'].sum():,.0f} L",
+                      delta=f"${df['RALENTI'].sum() * precio_gasoil / 1e6:.2f}M costo")
+        if 'CO2' in df.columns and df['CO2'].sum() > 0:
+            e2.metric('CO2 Total (ton)', f"{df['CO2'].sum() / 1000:.1f}")
+    else:
+        st.info('Datos de ralenti/CO2 no disponibles en el periodo seleccionado.')
+
+st.divider()
+
+# DATOS CRUDOS
+with st.expander('Ver datos completos'):
+    cols_s = [c for c in ['DOMINIO', 'MARCA', 'TAG', 'FECHA', 'KM', 'LITROS', 'L100KM', 'CO2', 'RALENTI']
               if c in df.columns]
     st.dataframe(df[cols_s], use_container_width=True, height=380)
 
-st.caption("Fuente: Google Sheets — Expreso Diemar | Refresco automático cada 5 min")
+st.caption(f'Datos: Google Sheets Expreso Diemar | Precio combustible: {precio_fuente} | Actualizacion cada 10 min')
