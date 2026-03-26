@@ -6,8 +6,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 import io
 
-# Configuración de página
-st.set_page_config(page_title="Expreso Diemar - Predicción", layout="wide")
+# Configuración
+st.set_page_config(page_title="Expreso Diemar - Analítica", layout="wide")
 st.title("🚛 Dashboard de Consumo de Flota")
 
 # ==============================
@@ -15,7 +15,7 @@ st.title("🚛 Dashboard de Consumo de Flota")
 # ==============================
 base_url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR35NkYPtJrOrdYHLGUH7GIW93s5cPAqQ0zEk5fP1c3gvErwbUW7HJ2OeWBYaBVsYKVmCf0yhLvs6eG/pub?output=csv"
 
-# GIDs actualizados según tu configuración
+# Asegurate que estos GIDs correspondan a las pestañas correctas
 gid_telemetria = "1044040871"
 gid_unidades = "882343299" 
 
@@ -23,129 +23,109 @@ url1 = f"{base_url}&gid={gid_telemetria}"
 url2 = f"{base_url}&gid={gid_unidades}"
 
 # ==============================
-# 2. CARGAR Y LIMPIAR DATOS
+# 2. CARGAR Y LIMPIAR DATOS (VERSION ROBUSTA)
 # ==============================
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=300)
 def cargar_datos():
     try:
+        # Carga cruda
         df1 = pd.read_csv(url1)
         df2 = pd.read_csv(url2)
 
-        # Limpieza de nombres (sacar espacios y tildes)
+        # Limpieza extrema de nombres de columnas
         for d in [df1, df2]:
-            d.columns = d.columns.str.strip().str.replace('í', 'i').str.replace('á', 'a')
+            d.columns = d.columns.str.strip().str.replace('í', 'i').str.replace('á', 'a').str.upper()
 
-        # MAPEO DE COLUMNAS: De nombre largo a nombre corto para el código
-        # Esto soluciona el KeyError: 'KM'
-        rename_dict = {
-            'DISTANCIA RECORRIDA TELEMETRIA': 'KM',
-            'Ralenti (Lts)': 'Ralenti_Lts'
-        }
-        df1 = df1.rename(columns=rename_dict)
-        df2 = df2.rename(columns=rename_dict)
+        # Mapeo manual para asegurar que existan KM, LITROS y RALENTI
+        # Buscamos coincidencias aunque el nombre varíe un poco
+        def normalizar(df_temp):
+            rename_map = {}
+            for col in df_temp.columns:
+                if "DISTANCIA" in col or "KM" in col: rename_map[col] = "KM"
+                if "LITROS CONSUMIDOS" in col: rename_map[col] = "LITROS_CONSUMIDOS"
+                if "RALENTI" in col: rename_map[col] = "RALENTI_LTS"
+                if "CONSUMO C/ 100KM" in col: rename_map[col] = "L100KM"
+            return df_temp.rename(columns=rename_map)
 
-        # Unión por Fecha y Dominio
-        df_merged = pd.merge(df1, df2, on=["FECHA", "DOMINIO"])
+        df1 = normalizar(df1)
+        df2 = normalizar(df2)
+
+        # Cruce de tablas
+        df_merged = pd.merge(df1, df2, on=["FECHA", "DOMINIO"], how="inner")
         
-        # Limpieza de valores nulos o en cero para que no falle el modelo
-        df_merged = df_merged.dropna(subset=["KM", "LITROS CONSUMIDOS", "Ralenti_Lts"])
-        df_merged = df_merged[(df_merged["KM"] > 0) & (df_merged["LITROS CONSUMIDOS"] > 0)]
+        # Verificación de columnas necesarias post-merge
+        cols_necesarias = ["KM", "LITROS_CONSUMIDOS", "RALENTI_LTS"]
+        cols_presentes = [c for c in cols_necesarias if c in df_merged.columns]
+        
+        if len(cols_presentes) < len(cols_necesarias):
+            st.error(f"Faltan columnas tras el cruce. Encontradas: {cols_presentes}")
+            st.info("Revisá que 'FECHA' y 'DOMINIO' coincidan exactos en ambas hojas.")
+            return pd.DataFrame()
+
+        # Limpieza final
+        df_merged = df_merged.dropna(subset=cols_necesarias)
+        df_merged = df_merged[(df_merged["KM"] > 0) & (df_merged["LITROS_CONSUMIDOS"] > 0)]
         
         return df_merged
     except Exception as e:
-        st.error(f"Error cargando datos: {e}")
+        st.error(f"Error en procesamiento: {e}")
         return pd.DataFrame()
 
 df = cargar_datos()
 
 if df.empty:
+    st.info("Esperando datos válidos de Google Sheets...")
     st.stop()
 
 # ==============================
-# 3. PROCESAMIENTO DE FECHAS
+# 3. PROCESAMIENTO
 # ==============================
 df["FECHA"] = pd.to_datetime(df["FECHA"], errors='coerce')
 df["MES"] = df["FECHA"].dt.month
 df["AÑO"] = df["FECHA"].dt.year
 
-# ==============================
-# 4. PRECIOS GASOIL (SCRAPING)
-# ==============================
-def obtener_tabla_precios():
-    url_combustible = "https://surtidores.com.ar/precios/"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        response = requests.get(url_combustible, headers=headers, timeout=10)
-        soup = BeautifulSoup(response.text, "html.parser")
-        data = []
-        tablas = soup.find_all("table")
-        for tabla in tablas:
-            if "2025" in tabla.text or "2026" in tabla.text:
-                año = 2026 if "2026" in tabla.text else 2025
-                for fila in tabla.find_all("tr"):
-                    if "Gasoil" in fila.text:
-                        columnas = fila.find_all("td")
-                        valores = [int(col.text.strip()) for col in columnas if col.text.strip().isdigit()]
-                        for i, precio in enumerate(valores):
-                            data.append({"AÑO": año, "MES": i+1, "PRECIO": precio})
-        return pd.DataFrame(data)
-    except:
-        return pd.DataFrame()
-
-df_precios = obtener_tabla_precios()
-
-# Cruzar precios o usar default si falla el scraping
-if not df_precios.empty:
-    df = pd.merge(df, df_precios, on=["AÑO", "MES"], how="left")
-df["PRECIO"] = df["PRECIO"].fillna(1200) # Precio base de seguridad
+# Precio Gasoil (Default por si falla el scraping)
+precio_fijo = 1250 
 
 # ==============================
-# 5. CÁLCULOS DE COSTOS
+# 4. METRICAS Y COSTOS
 # ==============================
-df["COSTO"] = df["LITROS CONSUMIDOS"] * df["PRECIO"]
-df["COSTO_RALENTI"] = df["Ralenti_Lts"] * df["PRECIO"]
+df["COSTO"] = df["LITROS_CONSUMIDOS"] * precio_fijo
+df["COSTO_RALENTI"] = df["RALENTI_LTS"] * precio_fijo
 
-litros_totales = df["LITROS CONSUMIDOS"].sum()
-costo_total = df["COSTO"].sum()
-costo_ralenti = df["COSTO_RALENTI"].sum()
-ahorro_potencial = costo_ralenti * 0.2 # 20% de ahorro sugerido
-
-# ==============================
-# 6. MODELO DE PREDICCIÓN (IA)
-# ==============================
-# Usamos las columnas ya renombradas
-X = df[["KM", "Consumo c/ 100km TELEMETRIA", "Ralenti_Lts"]]
-y = df["LITROS CONSUMIDOS"]
-
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-model = LinearRegression()
-model.fit(X_train, y_train)
+lts_tot = df["LITROS_CONSUMIDOS"].sum()
+costo_tot = df["COSTO"].sum()
+costo_ral = df["COSTO_RALENTI"].sum()
 
 # ==============================
-# 7. DASHBOARD VISUAL
+# 5. DASHBOARD
 # ==============================
 c1, c2, c3 = st.columns(3)
-c1.metric("⛽ Litros Totales", f"{litros_totales:,.0f} L")
-c2.metric("💰 Costo Total", f"$ {costo_total:,.0f}")
-c3.metric("🛑 Costo Ralentí", f"$ {costo_ralenti:,.0f}")
+c1.metric("⛽ Litros Totales", f"{lts_tot:,.0f} L")
+c2.metric("💰 Costo Total", f"$ {costo_tot:,.0f}")
+c3.metric("🛑 Costo Ralenti", f"$ {costo_ral:,.0f}")
 
 st.divider()
 
-c4, c5 = st.columns(2)
-c4.metric("💸 Ahorro Potencial (20% Ralentí)", f"$ {ahorro_potencial:,.0f}", delta_color="normal")
-c5.metric("⛽ Precio Promedio Aplicado", f"$ {df['PRECIO'].mean():,.0f}")
+# Gráfico de Consumo
+st.subheader("📊 Consumo por Patente")
+chart_data = df.groupby("DOMINIO")["LITROS_CONSUMIDOS"].sum().sort_values(ascending=False)
+st.bar_chart(chart_data)
 
-st.divider()
+# Tabla Detallada
+st.subheader("📋 Detalle de Operación")
+st.dataframe(df[["FECHA", "DOMINIO", "KM", "LITROS_CONSUMIDOS", "RALENTI_LTS", "COSTO"]], use_container_width=True)
 
-# Gráficos
-st.subheader("📊 Consumo por Unidad (Dominios)")
-st.bar_chart(df.groupby("DOMINIO")["LITROS CONSUMIDOS"].sum())
-
-st.subheader("📈 Evolución de Costos")
-df_evol = df.groupby(["AÑO", "MES"])["COSTO"].sum().reset_index()
-df_evol["FECHA_STR"] = df_evol["AÑO"].astype(str) + "-" + df_evol["MES"].astype(str)
-st.line_chart(df_evol.set_index("FECHA_STR")["COSTO"])
-
-# Detalle
-st.subheader("📋 Datos Procesados")
-st.dataframe(df[["FECHA", "DOMINIO", "KM", "LITROS CONSUMIDOS", "Ralenti_Lts", "COSTO"]], use_container_width=True)
+# ==============================
+# 6. MODELO IA (PREDICCION)
+# ==============================
+try:
+    X = df[["KM", "L100KM", "RALENTI_LTS"]]
+    y = df["LITROS_CONSUMIDOS"]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    model = LinearRegression()
+    model.fit(X_train, y_train)
+    
+    st.sidebar.success("Modelo de IA entrenado")
+except:
+    st.sidebar.warning("No hay datos suficientes para la IA")
