@@ -1,8 +1,6 @@
 import pandas as pd
 import streamlit as st
 import requests
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
 import io
 
 # Configuración
@@ -19,75 +17,77 @@ url2 = f"{base_url}&gid={gid_unidades}"
 @st.cache_data(ttl=60)
 def cargar_datos():
     try:
-        # Carga
+        # Carga cruda
         df1 = pd.read_csv(url1)
         df2 = pd.read_csv(url2)
 
-        # Limpieza de nombres (Mayúsculas y sin espacios)
-        df1.columns = df1.columns.str.strip().str.upper()
-        df2.columns = df2.columns.str.strip().str.upper()
+        # --- LIMPIEZA PROFUNDA ANTES DEL CRUCE ---
+        for d in [df1, df2]:
+            # Nombres de columnas en mayúsculas y sin espacios
+            d.columns = d.columns.str.strip().str.upper()
+            
+            # Limpieza de DOMINIO: sacamos espacios y pasamos a mayúsculas
+            if 'DOMINIO' in d.columns:
+                d['DOMINIO'] = d['DOMINIO'].astype(str).str.replace(' ', '').str.upper()
+            
+            # Limpieza de FECHA: forzamos formato fecha pura (sin horas)
+            if 'FECHA' in d.columns:
+                d['FECHA'] = pd.to_datetime(d['FECHA'], errors='coerce').dt.date
 
-        # Cruce
+        # CRUCE (Merge)
         df_merged = pd.merge(df1, df2, on=["FECHA", "DOMINIO"], how="inner")
         
-        # --- BUSCADOR INTELIGENTE DE COLUMNAS ---
-        # Buscamos en el resultado del merge qué nombres quedaron
+        # Si el cruce da vacío, mostramos qué hay en cada una para diagnosticar
+        if df_merged.empty:
+            return "ERROR_VACIO", df1, df2
+
+        # Buscador de columnas para gráficos
         final_cols = {}
         for col in df_merged.columns:
             if "KILOMETRAJE" in col or "KM" in col: final_cols["KM"] = col
-            if "LITROS_CONSUMIDOS" in col: final_cols["LITROS"] = col # Pesca _X o _Y
+            if "LITROS_CONSUMIDOS" in col: final_cols["LITROS"] = col
             if "EMISIONES" in col: final_cols["CO2"] = col
-            if "CHOFER" in col: final_cols["CHOFER"] = col
-            if "MARCA" in col: final_cols["MARCA"] = col
 
-        # Verificamos que tengamos lo básico
-        if "KM" in final_cols and "LITROS" in final_cols:
-            df_final = df_merged.rename(columns={
-                final_cols["KM"]: "KM",
-                final_cols["LITROS"]: "LITROS_CONSUMIDOS",
-                final_cols.get("CO2", "EMISIONES"): "EMISIONES"
-            })
-            
-            # Solo nos quedamos con una columna de Litros (por si quedaron las dos)
-            if isinstance(df_final["LITROS_CONSUMIDOS"], pd.DataFrame):
-                df_final["LITROS_CONSUMIDOS"] = df_final["LITROS_CONSUMIDOS"].iloc[:, 0]
+        df_final = df_merged.rename(columns={
+            final_cols.get("KM"): "KM",
+            final_cols.get("LITROS"): "LITROS_CONSUMIDOS",
+            final_cols.get("CO2"): "EMISIONES"
+        })
 
-            return df_final.dropna(subset=["KM", "LITROS_CONSUMIDOS"])
-        
-        return pd.DataFrame()
+        return "OK", df_final, None
         
     except Exception as e:
-        st.error(f"Error en el procesamiento: {e}")
-        return pd.DataFrame()
+        return f"ERROR_SISTEMA: {e}", None, None
 
-df = cargar_datos()
+# Ejecución
+estado, resultado, debug = cargar_datos()
 
-if not df.empty:
-    # --- MÉTRICAS ---
-    lts = df["LITROS_CONSUMIDOS"].sum()
-    kms = df["KM"].sum()
-    
+if estado == "OK":
+    df = resultado
+    # Métricas
     c1, c2, c3 = st.columns(3)
-    c1.metric("⛽ Litros Totales", f"{lts:,.0f} L")
-    c2.metric("🛣️ Km Totales", f"{kms:,.0f} km")
+    c1.metric("⛽ Litros Totales", f"{df['LITROS_CONSUMIDOS'].sum():,.0f} L")
+    c2.metric("🛣️ Km Totales", f"{df['KM'].sum():,.0f} km")
     if "EMISIONES" in df.columns:
         c3.metric("🌿 CO2 Total", f"{df['EMISIONES'].sum():,.0f} kg")
     
     st.divider()
+    st.subheader("📊 Consumo por Patente")
+    st.bar_chart(df.groupby("DOMINIO")["LITROS_CONSUMIDOS"].sum())
     
-    # --- GRÁFICOS ---
-    col_l, col_r = st.columns(2)
-    with col_l:
-        st.subheader("📊 Consumo por Patente")
-        st.bar_chart(df.groupby("DOMINIO")["LITROS_CONSUMIDOS"].sum())
-    with col_r:
-        st.subheader("🚛 Km por Unidad")
-        st.bar_chart(df.groupby("DOMINIO")["KM"].sum())
-    
-    st.divider()
-    
-    # --- TABLA ---
-    st.subheader("📋 Detalle Validado")
+    st.subheader("📋 Detalle de Datos Cruzados")
     st.dataframe(df, use_container_width=True)
+
+elif estado == "ERROR_VACIO":
+    st.error("❌ No hay coincidencias entre las dos hojas.")
+    st.write("### 🔍 Diagnóstico de Datos:")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.write("**Datos Telemetría (Hoja 1):**")
+        st.write(debug[['FECHA', 'DOMINIO']].head())
+    with col_b:
+        st.write("**Datos Unidades/CO2 (Hoja 2):**")
+        st.write(resultado[['FECHA', 'DOMINIO']].head())
+    st.info("💡 Asegurate que las fechas y patentes de arriba se vean EXACTAMENTE iguales.")
 else:
-    st.info("💡 No hay coincidencias. Asegurate que la 'FECHA' y el 'DOMINIO' estén escritos igual en ambas hojas de Google Sheets.")
+    st.error(estado)
