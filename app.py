@@ -399,7 +399,7 @@ else:
         precio_sim = precio_gasoil * (1 + delta_precio_pct / 100)
         ralenti_total = df['RALENTI'].sum() if 'RALENTI' in df.columns else 0
         ahorro_ralenti_lts = ralenti_total * (delta_ralenti_pct / 100)
-        ahorro_ralenti_m$  = ahorro_ralenti_lts * precio_sim / 1e6
+        ahorro_ralenti_mm  = ahorro_ralenti_lts * precio_sim / 1e6
 
         wf1, wf2, wf3 = st.columns(3)
         with wf1:
@@ -411,7 +411,7 @@ else:
             diff_costo = costo_sim_m1 - costo_base_m1
             st.markdown('<div class="kpi-card {}"><div class="kpi-label">Costo {}</div><div class="kpi-value">${:.2f}M</div><div class="kpi-sub">{:+.2f}M vs base</div></div>'.format('kpi-red' if diff_costo>0 else 'kpi-green', meses_fut[0], costo_sim_m1, diff_costo), unsafe_allow_html=True)
         with wf3:
-            st.markdown('<div class="kpi-card kpi-green"><div class="kpi-label">Ahorro por Ralentí</div><div class="kpi-value">${:.2f}M</div><div class="kpi-sub">{:,.0f} L menos</div></div>'.format(ahorro_ralenti_m$, ahorro_ralenti_lts), unsafe_allow_html=True)
+            st.markdown('<div class="kpi-card kpi-green"><div class="kpi-label">Ahorro por Ralentí</div><div class="kpi-value">${:.2f}M</div><div class="kpi-sub">{:,.0f} L menos</div></div>'.format(ahorro_ralenti_mm, ahorro_ralenti_lts), unsafe_allow_html=True)
 
         st.markdown('<br><b style="color:#e2e8f0">Costo Proyectado — 3 meses (precio simulado)</b>', unsafe_allow_html=True)
         cost_df = pd.DataFrame({
