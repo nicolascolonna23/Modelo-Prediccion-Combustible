@@ -9,8 +9,8 @@ from sklearn.metrics import mean_absolute_error, r2_score
 # 1. LINKS DE ONEDRIVE
 # ==============================
 
-url1 = "LINK_TELEMETRIA"
-url2 = "LINK_CONDUCCION"
+url1 = "https://expresodiemar-my.sharepoint.com/:x:/g/personal/nicolascolonna_expresodiemar_onmicrosoft_com/IQCCJG7r9T2JTb0eAdpQU1ggAcTn9ZELfjq58Xk9-eqj58o?e=qOAaQe=download?"
+url2 = "https://expresodiemar-my.sharepoint.com/:x:/g/personal/nicolascolonna_expresodiemar_onmicrosoft_com/IQAWlrsay0HVT622_ANLB-bWAfMlRi4IHHFMH6DJBzVW3BU?e=M1unfp=download?"
 
 # ==============================
 # 2. CARGAR DESDE WEB
