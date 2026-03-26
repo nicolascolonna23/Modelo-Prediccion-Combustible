@@ -44,30 +44,52 @@ def cargar_datos():
         df2 = pd.read_csv(URL_UNID)
 
         def limpiar(df):
-            # Aseguramos que las columnas sean strings antes de usar .str
-            df.columns = pd.Index([str(c) for c in df.columns])
-            df.columns = df.columns.str.strip().str.upper()
+            # Normalizar nombres de columnas a string, limpiar y mayusculas
+            df.columns = [str(c).strip().upper() for c in df.columns]
+
+            # Eliminar columnas duplicadas (quedarse con la primera)
+            df = df.loc[:, ~df.columns.duplicated()]
+
             cm = {}
             for c in df.columns:
-                if "DOMINIO" in c or "PATENTE" in c:   cm[c] = "DOMINIO"
-                elif "LITROS" in c or "CONSUMID" in c: cm[c] = "LITROS"
-                elif "DISTANCIA" in c or "KM" in c or "KILOMETR" in c: cm[c] = "KM"
-                elif "CO2" in c or "EMISION" in c:     cm[c] = "CO2"
-                elif "MARCA" in c:                     cm[c] = "MARCA"
-                elif "TAG" in c or "RUTA" in c or "SITE" in c: cm[c] = "TAG"
-                elif "FECHA" in c or "DATE" in c:      cm[c] = "FECHA"
-                elif "L/100" in c or "CONSUMO C" in c: cm[c] = "L100KM"
+                if "DOMINIO" in c or "PATENTE" in c:
+                    cm[c] = "DOMINIO"
+                elif "LITROS" in c or "CONSUMID" in c:
+                    cm[c] = "LITROS"
+                elif "DISTANCIA" in c or "KM" in c or "KILOMETR" in c:
+                    cm[c] = "KM"
+                elif "CO2" in c or "EMISION" in c:
+                    cm[c] = "CO2"
+                elif "MARCA" in c:
+                    cm[c] = "MARCA"
+                elif "TAG" in c or "RUTA" in c or "SITE" in c:
+                    cm[c] = "TAG"
+                elif "FECHA" in c or "DATE" in c:
+                    cm[c] = "FECHA"
+                elif "L/100" in c or "CONSUMO C" in c:
+                    cm[c] = "L100KM"
             df = df.rename(columns=cm)
+
+            # Eliminar duplicados que pueden aparecer tras el rename
+            df = df.loc[:, ~df.columns.duplicated()]
+
             if "DOMINIO" in df.columns:
                 df["DOMINIO"] = df["DOMINIO"].astype(str).str.strip().str.upper()
+
             for col in ["LITROS", "KM", "CO2", "L100KM"]:
                 if col in df.columns:
-                    df[col] = (df[col].astype(str)
-                               .str.replace(".", "", regex=False)
-                               .str.replace(",", ".", regex=False))
-                    df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+                    serie = df[col]
+                    # Si por alguna razon es DataFrame, tomar la primera columna
+                    if isinstance(serie, pd.DataFrame):
+                        serie = serie.iloc[:, 0]
+                    serie = (serie.astype(str)
+                             .str.replace(".", "", regex=False)
+                             .str.replace(",", ".", regex=False))
+                    df[col] = pd.to_numeric(serie, errors="coerce").fillna(0)
+
             if "FECHA" in df.columns:
                 df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce", dayfirst=True)
+
             return df
 
         df1 = limpiar(df1)
