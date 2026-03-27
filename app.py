@@ -28,9 +28,9 @@ section[data-testid="stMain"] { background: #0f172a; }
 [data-testid="stMetricValue"] { color: #f1f5f9 !important; }
 [data-testid="stMetricDelta"] { color: #94a3b8 !important; }
 .kpi-card {
-    background: #1e293b; border-radius: 14px; padding: 18px 22px;
+    background: #1e293b; border-radius: 14px; padding: 24px 28px;
     box-shadow: 0 2px 10px rgba(0,0,0,0.4); text-align: center;
-    border-left: 5px solid #2563eb; margin-bottom: 6px;
+    border-left: 5px solid #2563eb; margin-bottom: 16px;
 }
 .kpi-label { font-size:0.78rem; color:#94a3b8; font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
 .kpi-value { font-size:2rem; font-weight:800; color:#f1f5f9; line-height:1.1; }
@@ -239,6 +239,20 @@ meses_df['L100'] = (meses_df['LITROS'] / meses_df['KM'].replace(0, np.nan) * 100
 # Ralentí total (usado en dashboard y predictivo)
 ralenti_total = df['RALENTI'].sum() if 'RALENTI' in df.columns else 0
 
+# Ralentí delta vs mes anterior
+ralenti_delta_txt = ''
+if 'RALENTI' in df.columns and 'MES_PERIODO' in df.columns:
+    _mg = df.groupby('MES_PERIODO').agg(
+        _RAL=('RALENTI', 'sum'), _LTS=('LITROS', 'sum')
+    ).reset_index().sort_values('MES_PERIODO')
+    if len(_mg) >= 2:
+        _curr = _mg.iloc[-1]
+        _prev = _mg.iloc[-2]
+        _pct_curr = _curr['_RAL'] / _curr['_LTS'] * 100 if _curr['_LTS'] > 0 else 0
+        _pct_prev = _prev['_RAL'] / _prev['_LTS'] * 100 if _prev['_LTS'] > 0 else 0
+        _dr = _pct_curr - _pct_prev
+        ralenti_delta_txt = f"{'▲' if _dr > 0 else '▼'} {abs(_dr):.1f}pp vs mes ant."
+
 # ===== DASHBOARD PRINCIPAL =====
 if pg == "Dashboard Principal":
     col_logo, col_title = st.columns([1, 5])
@@ -273,8 +287,6 @@ if pg == "Dashboard Principal":
     else:
         delta_txt, delta_col = '', ''
 
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
-
     def kpi(cont, color, label, value, sub=''):
         cont.markdown(
             f'<div class="kpi-card {color}">'
@@ -283,12 +295,17 @@ if pg == "Dashboard Principal":
             f'<div class="kpi-sub">{sub}</div>'
             f'</div>', unsafe_allow_html=True)
 
+    k1, k2, k3 = st.columns(3)
     kpi(k1, '', '⛽ Litros totales', f'{lts_total:,.0f}', 'litros 2026')
     kpi(k2, '', '🛣️ KM recorridos', f'{kms_total:,.0f}', 'kilómetros 2026')
     kpi(k3, delta_col, '📊 L/100km flota', f'{l100_prom:.2f}', delta_txt)
+
+    k4, k5, k6 = st.columns(3)
     kpi(k4, 'kpi-amber', '💰 Costo estimado', f'${costo_est/1e6:.1f}M', f'@ ${precio_gasoil:,.0f}/L')
     kpi(k5, 'kpi-green', '🚛 Unidades activas', f'{n_unidades}', 'dominios únicos')
-    kpi(k6, 'kpi-amber', '⏱️ % Ralentí', f'{ralenti_pct:.1f}%', f'{ralenti_total:,.0f} L en ralentí')
+    _ral_sub = (f'{ralenti_total:,.0f} L · {ralenti_delta_txt}' if ralenti_delta_txt
+                else f'{ralenti_total:,.0f} L en ralentí')
+    kpi(k6, 'kpi-amber', '⏱️ % Ralentí', f'{ralenti_pct:.1f}%', _ral_sub)
 
     st.divider()
 
@@ -354,12 +371,26 @@ if pg == "Dashboard Principal":
             st.markdown(rh, unsafe_allow_html=True)
 
     with rcol2:
-        st.markdown('**TOP 10 MENOS eficientes**')
+        st.markdown('**TOP 10 menos eficientes (mayor L/100km)**')
         if 'DOMINIO' in df.columns and 'L100KM' in df.columns:
             rw = (df[df['L100KM'] > 0]
                   .groupby('DOMINIO')['L100KM'].mean().round(2)
                   .reset_index().sort_values('L100KM', ascending=False).head(10))
-            st.dataframe(rw, use_container_width=True, hide_index=True)
+            vmin_w, vmax_w = rw['L100KM'].min(), rw['L100KM'].max()
+            rh_w = '<div style="background:#1e293b;border-radius:12px;padding:16px;">'
+            rh_w += '<div style="font-size:.72rem;display:flex;justify-content:space-between;color:#94a3b8;margin-bottom:6px;"><span>Unidad</span><span>L/100km</span></div>'
+            for i, (_, r) in enumerate(rw.iterrows(), 1):
+                v = r['L100KM']
+                pct = int((v - vmin_w) / (vmax_w - vmin_w) * 100) if vmax_w != vmin_w else 50
+                cb = '#ef4444' if i <= 3 else ('#f59e0b' if i <= 6 else '#22c55e')
+                rh_w += (f'<div class="rank-row">'
+                         f'<div class="rank-num">#{i}</div>'
+                         f'<div class="rank-dom">{r["DOMINIO"]}</div>'
+                         f'<div class="rank-bar-bg"><div class="rank-bar" style="width:{pct}%;background:{cb}"></div></div>'
+                         f'<div class="rank-val" style="color:{cb}">{v:.2f}</div>'
+                         f'</div>')
+            rh_w += '</div>'
+            st.markdown(rh_w, unsafe_allow_html=True)
 
     st.divider()
 
@@ -604,7 +635,7 @@ else:
                 f'<div class="kpi-card {color_wf2}">'
                 f'<div class="kpi-label">Costo {meses_fut[0]}</div>'
                 f'<div class="kpi-value">${costo_sim_m1:.2f}M</div>'
-                f'<div class="kpi-sub">{diff_costo:+.2f}M vs base</div>'
+                f'<div class="kpi-sub">{aiff_costo:+.2f}M vs base</div>'
                 f'</div>',
                 unsafe_allow_html=True)
 
@@ -622,4 +653,4 @@ else:
     else:
         st.info('Se necesitan al menos 2 meses de datos de 2026 para el modelo predictivo.')
 
-    st.caption(f'Datos 2026: Google Sheets Expreso Diemar | Precio: {precio_fuente} | Actualización cada 10 min')
+    st.caption(I'Datos 2026: Google Sheets Expreso Diemar | Precio: {precio_fuente} | Actualización cada 10 min')
