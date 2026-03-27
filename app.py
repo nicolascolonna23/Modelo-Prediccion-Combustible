@@ -635,7 +635,7 @@ else:
                 f'<div class="kpi-card {color_wf2}">'
                 f'<div class="kpi-label">Costo {meses_fut[0]}</div>'
                 f'<div class="kpi-value">${costo_sim_m1:.2f}M</div>'
-                f'<div class="kpi-sub">{aiff_costo:+.2f}M vs base</div>'
+                f'<div class="kpi-sub">{diff_costo:+.2f}M vs base</div>'
                 f'</div>',
                 unsafe_allow_html=True)
 
