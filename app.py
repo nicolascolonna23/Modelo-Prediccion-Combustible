@@ -653,4 +653,4 @@ else:
     else:
         st.info('Se necesitan al menos 2 meses de datos de 2026 para el modelo predictivo.')
 
-    st.caption(I'Datos 2026: Google Sheets Expreso Diemar | Precio: {precio_fuente} | Actualización cada 10 min')
+    st.caption(f'Datos 2026: Google Sheets Expreso Diemar | Precio: {precio_fuente} | Actualización cada 10 min')
