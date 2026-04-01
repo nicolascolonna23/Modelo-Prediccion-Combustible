@@ -2,46 +2,55 @@ import pandas as pd
 import streamlit as st
 import numpy as np
 import os
-import requests
-from bs4 import BeautifulSoup
 import warnings
-
 warnings.filterwarnings('ignore')
 
 st.set_page_config(page_title="Expreso Diemar — Dashboard", layout="wide")
 
 @st.cache_data(ttl=300)
 def cargar_datos():
-    archivos = os.listdir('.')
-    file_tel = next((f for f in archivos if "ANALISIS" in f.upper() and f.endswith('.xlsx')), None)
+    # Busca el archivo en la carpeta actual Y en subcarpeta COMBUSTIBLE
+    carpetas = ['.', 'COMBUSTIBLE']
+    file_tel = None
+    for carpeta in carpetas:
+        if os.path.exists(carpeta):
+            archivos = os.listdir(carpeta)
+            match = next((f for f in archivos if "ANALISIS" in f.upper() and f.endswith('.xlsx')), None)
+            if match:
+                file_tel = os.path.join(carpeta, match)
+                break
 
     if not file_tel:
-        st.error(f"❌ No se encontró el archivo Excel. Archivos en repo: {archivos}")
+        st.error("❌ No se encontró el archivo Excel (debe contener 'ANALISIS' en el nombre).")
         st.stop()
 
     try:
         df = pd.read_excel(file_tel, engine="openpyxl")
         df.columns = [str(c).strip().upper() for c in df.columns]
-        
-        # Mapeo flexible basado en tus capturas
+
+        # Mapeo flexible de columnas
         mapeo = {}
         for c in df.columns:
-            if "DOMINIO" in c: mapeo[c] = "DOMINIO"
-            elif "LITROS" in c: mapeo[c] = "LITROS"
-            elif any(x in c for x in ["DISTANCIA", "KM", "KILOMETR"]): mapeo[c] = "KM"
-            elif "FECHA" in c: mapeo[c] = "FECHA"
-            elif any(x in c for x in ["TAG", "EMPRESA"]): mapeo[c] = "EMPRESA"
-        
+            if "DOMINIO" in c:
+                mapeo[c] = "DOMINIO"
+            elif "LITROS" in c:
+                mapeo[c] = "LITROS"
+            elif any(x in c for x in ["DISTANCIA", "KM", "KILOMETR"]):
+                mapeo[c] = "KM"
+            elif "FECHA" in c:
+                mapeo[c] = "FECHA"
+            elif any(x in c for x in ["TAG", "EMPRESA"]):
+                mapeo[c] = "EMPRESA"
+
         df = df.rename(columns=mapeo)
 
-        # --- PROCESAMIENTO DE FECHAS (Solución al error de Series) ---
+        # --- PROCESAMIENTO DE FECHAS (corregido) ---
         if "FECHA" in df.columns:
-            # Convertimos a lista y luego a fecha para evitar errores de Pandas
-            fechas_lista = list(df["FECHA"])
-            df["FECHA"] = pd.to_datetime(fechas_lista, errors='coerce')
+            # Pasamos la Serie directamente, sin convertir a lista
+            df["FECHA"] = pd.to_datetime(df["FECHA"], errors='coerce')
             df = df.dropna(subset=["FECHA"])
-            
-            # FILTRO: Intentar 2026, si está vacío, mostrar 2025
+
+            # FILTRO: Mostrar 2026 si existe, sino 2025
             df_2026 = df[df["FECHA"].dt.year == 2026]
             if not df_2026.empty:
                 df = df_2026
@@ -49,7 +58,7 @@ def cargar_datos():
                 st.info("ℹ️ Mostrando datos de 2025 (No se detectaron registros de 2026 aún).")
                 df = df[df["FECHA"].dt.year == 2025]
 
-        # Limpieza de Números
+        # Limpieza de números
         for col in ["LITROS", "KM"]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
@@ -60,10 +69,11 @@ def cargar_datos():
         st.error(f"❌ Error en el procesamiento: {e}")
         st.stop()
 
+
 # --- EJECUCIÓN ---
 df_raw = cargar_datos()
 
-# Interfaz Simple
+# Interfaz
 st.sidebar.title("Expreso Diemar")
 st.header("🚛 Dashboard de Telemetría")
 
@@ -72,7 +82,7 @@ if df_raw.empty:
 else:
     lts = df_raw["LITROS"].sum()
     kms = df_raw["KM"].sum()
-    prom = (lts/kms*100) if kms > 0 else 0
+    prom = (lts / kms * 100) if kms > 0 else 0
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Litros Totales", f"{lts:,.0f}")
