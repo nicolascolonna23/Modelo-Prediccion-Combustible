@@ -9,7 +9,6 @@ st.set_page_config(page_title="Expreso Diemar — Dashboard", layout="wide")
 
 @st.cache_data(ttl=300)
 def cargar_datos():
-    # Busca el archivo en la carpeta actual Y en subcarpeta COMBUSTIBLE
     carpetas = ['.', 'COMBUSTIBLE']
     file_tel = None
     for carpeta in carpetas:
@@ -21,21 +20,20 @@ def cargar_datos():
                 break
 
     if not file_tel:
-        st.error("❌ No se encontró el archivo Excel (debe contener 'ANALISIS' en el nombre).")
+        st.error("No se encontro el archivo Excel.")
         st.stop()
 
     try:
         df = pd.read_excel(file_tel, engine="openpyxl")
         df.columns = [str(c).strip().upper() for c in df.columns]
 
-        # Mapeo flexible de columnas
         mapeo = {}
         for c in df.columns:
             if "DOMINIO" in c:
                 mapeo[c] = "DOMINIO"
             elif "LITROS" in c:
                 mapeo[c] = "LITROS"
-            elif any(x in c for x in ["DISTANCIA", "KM", "KILOMETR"]):
+            elif any(x in c for x in ["DISTANCIA", "KILOMETR"]) or c == "KM":
                 mapeo[c] = "KM"
             elif "FECHA" in c:
                 mapeo[c] = "FECHA"
@@ -43,22 +41,18 @@ def cargar_datos():
                 mapeo[c] = "EMPRESA"
 
         df = df.rename(columns=mapeo)
+        df = df.loc[:, ~df.columns.duplicated()]
 
-        # --- PROCESAMIENTO DE FECHAS (corregido) ---
         if "FECHA" in df.columns:
-            # Pasamos la Serie directamente, sin convertir a lista
             df["FECHA"] = pd.to_datetime(df["FECHA"], errors='coerce')
             df = df.dropna(subset=["FECHA"])
-
-            # FILTRO: Mostrar 2026 si existe, sino 2025
             df_2026 = df[df["FECHA"].dt.year == 2026]
             if not df_2026.empty:
                 df = df_2026
             else:
-                st.info("ℹ️ Mostrando datos de 2025 (No se detectaron registros de 2026 aún).")
+                st.info("Mostrando datos de 2025.")
                 df = df[df["FECHA"].dt.year == 2025]
 
-        # Limpieza de números
         for col in ["LITROS", "KM"]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
@@ -66,19 +60,19 @@ def cargar_datos():
         return df
 
     except Exception as e:
-        st.error(f"❌ Error en el procesamiento: {e}")
+        import traceback
+        st.error(f"Error: {e}")
+        st.code(traceback.format_exc())
         st.stop()
 
 
-# --- EJECUCIÓN ---
 df_raw = cargar_datos()
 
-# Interfaz
 st.sidebar.title("Expreso Diemar")
-st.header("🚛 Dashboard de Telemetría")
+st.header("🚛 Dashboard de Telemetria")
 
 if df_raw.empty:
-    st.warning("⚠️ El archivo no contiene datos válidos de 2025 o 2026.")
+    st.warning("Sin datos validos de 2025 o 2026.")
 else:
     lts = df_raw["LITROS"].sum()
     kms = df_raw["KM"].sum()
