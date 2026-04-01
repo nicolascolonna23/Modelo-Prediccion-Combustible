@@ -493,10 +493,12 @@ else:
             hist_prev = hist.iloc[:-1].copy()
             if len(hist_prev) >= 2:
                 hist_prev['T'] = range(len(hist_prev))
-                Xprev  = poly.fit_transform(hist_prev['T'].values.reshape(-1,1))
+                degree_prev = min(2, len(hist_prev) - 1)
+                poly_prev  = PolynomialFeatures(degree=degree_prev)
+                Xprev  = poly_prev.fit_transform(hist_prev['T'].values.reshape(-1,1))
                 m_prev = LinearRegression().fit(Xprev, hist_prev['L100'].values)
-                pred_ultimo = float(np.clip(
-                    m_prev.predict(np.array([[len(hist_prev)]]).reshape(-1,1)), 0, 100)[0])
+                X_pred_prev = poly_prev.transform(np.array([[len(hist_prev)]]).reshape(-1,1))
+                pred_ultimo = float(np.clip(m_prev.predict(X_pred_prev), 0, 100)[0])
                 desvio     = ultimo_real_l100 - pred_ultimo
                 desvio_pct = (desvio / pred_ultimo * 100) if pred_ultimo > 0 else 0
                 umbral     = 1.5 * std_res
