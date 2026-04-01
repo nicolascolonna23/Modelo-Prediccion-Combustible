@@ -8,8 +8,14 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-st.set_page_config(page_title="Expreso Diemar 2026", layout="wide")
+# 1. Configuración de página
+st.set_page_config(
+    page_title="Expreso Diemar — Predicción Combustible",
+    page_icon="🚛",
+    layout="wide",
+)
 
+# --- CARGA DE DATOS ---
 @st.cache_data(ttl=300)
 def cargar_datos():
     archivos = os.listdir('.')
@@ -17,17 +23,17 @@ def cargar_datos():
     file_tel = next((f for f in archivos if "ANALISIS" in f.upper() and f.endswith('.xlsx')), None)
 
     if not file_tel:
-        st.error(f"❌ No se encuentra el archivo ANALISIS CONSUMO en el repo. Archivos: {archivos}")
+        st.error(f"❌ No se encuentra el archivo ANALISIS CONSUMO en el repo. Archivos detectados: {archivos}")
         st.stop()
 
     try:
-        # 1. Carga inicial
+        # Carga del Excel
         df = pd.read_excel(file_tel, engine="openpyxl")
         
-        # 2. Normalizar nombres de columnas (Mayúsculas y sin espacios)
+        # Normalizar nombres de columnas
         df.columns = [str(c).strip().upper() for c in df.columns]
         
-        # 3. Mapeo Manual de Columnas
+        # Mapeo de Columnas
         mapeo = {}
         for c in df.columns:
             if any(x in c for x in ["DOMINIO", "PATENTE", "UNIDAD"]): mapeo[c] = "DOMINIO"
@@ -38,58 +44,68 @@ def cargar_datos():
         
         df = df.rename(columns=mapeo)
 
-        # --- SOLUCIÓN AL ERROR: arg must be a list ---
-        # 4. Procesar FECHAS (Ignorar 2024 y 2025)
+        # --- PROCESAMIENTO SEGURO ---
+        
+        # 4. Procesar FECHAS (Filtro 2026)
         if "FECHA" in df.columns:
-            # Convertimos a lista de Python pura para evitar errores de Series
-            lista_fechas = df["FECHA"].tolist()
-            df["FECHA"] = pd.to_datetime(lista_fechas, errors='coerce')
+            # Usamos pd.to_datetime directamente sobre la serie
+            df["FECHA"] = pd.to_datetime(df["FECHA"], errors='coerce')
             df = df.dropna(subset=["FECHA"])
-            # Filtro estricto 2026
+            # Filtrar solo el año 2026
             df = df[df["FECHA"].dt.year == 2026]
 
         # 5. Procesar NÚMEROS (LITROS y KM)
-        for col in ["LITROS", "KM"]:
-            if col in df.columns:
-                lista_num = df[col].tolist()
-                df[col] = pd.to_numeric(lista_num, errors="coerce").fillna(0)
+        columnas_num = [c for c in ["LITROS", "KM"] if c in df.columns]
+        for col in columnas_num:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
         return df
 
     except Exception as e:
-        st.error(f"❌ Error en el procesamiento: {e}")
+        st.error(f"❌ Error en el procesamiento de datos: {e}")
         st.stop()
 
-# --- LÓGICA DE EJECUCIÓN ---
+# --- SCRAPER PRECIO ---
+@st.cache_data(ttl=3600)
+def obtener_precio():
+    try:
+        r = requests.get("https://surtidores.com.ar/precios/", timeout=5)
+        soup = BeautifulSoup(r.text, "html.parser")
+        import re
+        precios = [int(n) for n in re.findall(r'\b(\d{3,4})\b', soup.get_text()) if 800 < int(n) < 3000]
+        return float(precios[-1]), "Surtidores.com.ar"
+    except:
+        return 2025.0, "Referencia"
+
+# --- EJECUCIÓN ---
 df_raw = cargar_datos()
+precio_actual, fuente_p = obtener_precio()
 
-# Scraper de precio (Opcional, con respaldo)
-try:
-    r = requests.get("https://surtidores.com.ar/precios/", timeout=5)
-    soup = BeautifulSoup(r.text, "html.parser")
-    import re
-    precios = [int(n) for n in re.findall(r'\b(\d{3,4})\b', soup.get_text()) if 800 < int(n) < 3000]
-    precio_actual = float(precios[-1])
-except:
-    precio_actual = 2026.0
-
-# --- INTERFAZ ---
+# Interfaz
 st.sidebar.title("Expreso Diemar")
-st.header("🚛 Dashboard LAD 2026")
+st.sidebar.markdown("---")
+opcion = st.sidebar.radio("Navegación", ["Dashboard Principal", "Modelo Predictivo"])
 
-if df_raw.empty:
-    st.warning("⚠️ El archivo se cargó pero no hay datos del año 2026.")
+if opcion == "Dashboard Principal":
+    st.header("🚛 Dashboard LAD 2026")
+    st.write(f"**Precio Combustible:** ${precio_actual:,.0f}/L ({fuente_p})")
+
+    if df_raw.empty:
+        st.warning("⚠️ No se encontraron datos del año 2026 en el archivo subido.")
+    else:
+        # Métricas
+        lts_tot = df_raw["LITROS"].sum()
+        km_tot = df_raw["KM"].sum()
+        cons_prom = (lts_tot / km_tot * 100) if km_tot > 0 else 0
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Litros 2026", f"{lts_tot:,.0f}")
+        c2.metric("KM 2026", f"{km_tot:,.0f}")
+        c3.metric("L/100km Promedio", f"{cons_prom:.2f}")
+
+        st.divider()
+        st.subheader("Registros 2026")
+        st.dataframe(df_raw, use_container_width=True, hide_index=True)
 else:
-    # Cálculos sobre el Dashboard
-    lts = df_raw["LITROS"].sum()
-    kms = df_raw["KM"].sum()
-    prom = (lts / kms * 100) if kms > 0 else 0
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Litros 2026", f"{lts:,.0f}")
-    c2.metric("KM 2026", f"{kms:,.0f}")
-    c3.metric("L/100km Promedio", f"{prom:.2f}")
-
-    st.divider()
-    st.subheader("Registros Detallados (Solo 2026)")
-    st.dataframe(df_raw, use_container_width=True, hide_index=True)
+    st.header("🧠 Modelo Predictivo")
+    st.info("Datos de telemetría de 2026 listos para análisis.")
