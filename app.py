@@ -19,6 +19,12 @@ st.set_page_config(
 LOGO_URL  = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/logo_diemar4.png"
 IVECO_URL = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/S-Way-6x2-1.webp"
 SCANIA_URL= "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/2016p.png"
+STRALIS_URL = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/ds_store"
+
+# Patentes por modelo
+SWAY_PATENTES    = ['AH522SI', 'AH862UB', 'AH938VO', 'AH842GQ']
+SCANIA_PATENTES  = ['AD247MQ', 'AE423IW']
+# Stralis = todas las demás patentes de la flota (se calcula dinámicamente)
 
 DARK_CSS = """
 <style>
@@ -156,7 +162,6 @@ def cargar_datos():
             if len(lad_units) > 0:
                 df1 = df1[df1["DOMINIO"].isin(lad_units)]
 
-        # NO filtramos por año — guardamos todo el histórico para entrenamiento
         return df1, df2
 
     except Exception as e:
@@ -192,6 +197,17 @@ def obtener_precio_gasoil():
     return 2025.0, "referencia estimada (mar 2026)"
 
 
+def asignar_modelo(dominio):
+    """Asigna el modelo según la patente."""
+    d = str(dominio).strip().upper()
+    if d in SWAY_PATENTES:
+        return 'S-Way'
+    elif d in SCANIA_PATENTES:
+        return 'Scania'
+    else:
+        return 'Stralis'
+
+
 # ── Carga inicial ──────────────────────────────────────────────────────────────
 with st.spinner('Cargando telemetría...'):
     df_raw, df_unid = cargar_datos()
@@ -203,8 +219,10 @@ if df_raw.empty:
 precio_gasoil, precio_fuente = obtener_precio_gasoil()
 st.markdown(DARK_CSS, unsafe_allow_html=True)
 
-# df_full = TODO el histórico (para modelo)
-# df = filtrado al año de visualización seleccionado (para dashboard/patentes)
+# Asignar columna MODELO a df_raw
+if 'DOMINIO' in df_raw.columns:
+    df_raw['MODELO'] = df_raw['DOMINIO'].apply(asignar_modelo)
+
 df_full = df_raw.copy()
 
 # Año de visualización — sidebar
@@ -217,15 +235,37 @@ df = df_full[df_full['FECHA'].dt.year == anio_sel].copy() if 'FECHA' in df_full.
 if 'FECHA' in df.columns and df['FECHA'].notna().any():
     st.sidebar.markdown("---")
     st.sidebar.markdown('<div class="sidebar-filter-header">🔍 Filtros</div>', unsafe_allow_html=True)
-    fmin  = df['FECHA'].min().date()
-    fmax  = df['FECHA'].max().date()
-    desde = st.sidebar.date_input('Desde', value=fmin, min_value=fmin, max_value=fmax)
-    hasta = st.sidebar.date_input('Hasta', value=fmax, min_value=fmin, max_value=fmax)
+
+    # ── FILTRO POR MES/AÑO (en lugar de día) ──────────────────────────────────
+    # Obtener períodos mensuales disponibles
+    periodos_disponibles = sorted(df['FECHA'].dt.to_period('M').dropna().unique().tolist())
+    periodos_str = [str(p) for p in periodos_disponibles]
+
+    if periodos_str:
+        desde_idx = st.sidebar.selectbox(
+            'Desde (mes/año)',
+            options=periodos_str,
+            index=0
+        )
+        hasta_idx = st.sidebar.selectbox(
+            'Hasta (mes/año)',
+            options=periodos_str,
+            index=len(periodos_str) - 1
+        )
+
+        desde_periodo = pd.Period(desde_idx, 'M')
+        hasta_periodo = pd.Period(hasta_idx, 'M')
+
+        df = df[
+            (df['FECHA'].dt.to_period('M') >= desde_periodo) &
+            (df['FECHA'].dt.to_period('M') <= hasta_periodo)
+        ]
+
     marcas_disp  = sorted(df['MARCA'].dropna().unique().tolist()) if 'MARCA' in df.columns else []
     marcas_sel   = st.sidebar.multiselect('Marca', marcas_disp, default=marcas_disp)
     patentes_disp = sorted(df['DOMINIO'].dropna().unique().tolist()) if 'DOMINIO' in df.columns else []
     patentes_sel  = st.sidebar.multiselect('Patente', patentes_disp, default=[], placeholder="Todas las patentes")
-    df = df[(df['FECHA'].dt.date >= desde) & (df['FECHA'].dt.date <= hasta)]
+
     if marcas_sel   and 'MARCA'   in df.columns: df = df[df['MARCA'].isin(marcas_sel)]
     if patentes_sel and 'DOMINIO' in df.columns: df = df[df['DOMINIO'].isin(patentes_sel)]
 
@@ -324,29 +364,54 @@ if pg == "Dashboard Principal":
 
     st.divider()
 
-    st.markdown(f'<div class="sec-title">Rendimiento por Marca — {anio_sel}</div>', unsafe_allow_html=True)
+    # ══════════════════════════════════════════════════════════════════════════
+    #  RENDIMIENTO POR MODELO (reemplaza "Rendimiento por Marca")
+    # ══════════════════════════════════════════════════════════════════════════
+    st.markdown(f'<div class="sec-title">Rendimiento por Modelo — {anio_sel}</div>', unsafe_allow_html=True)
 
-    def stats_marca(marca):
-        sub = df[df['MARCA'].str.upper() == marca.upper()] if 'MARCA' in df.columns else pd.DataFrame()
+    def stats_modelo(patentes_lista):
+        """Calcula stats para un conjunto de patentes."""
+        if 'DOMINIO' not in df.columns:
+            return {'l100': 0, 'lts': 0, 'kms': 0, 'n': 0, 'patentes': []}
+        sub = df[df['DOMINIO'].isin(patentes_lista)]
         if sub.empty:
-            return {'l100': 0, 'lts': 0, 'kms': 0, 'n': 0}
-        lts = sub['LITROS'].sum(); kms = sub['KM'].sum()
-        return {'l100': round(lts/kms*100, 2) if kms > 0 else 0, 'lts': lts, 'kms': kms, 'n': sub['DOMINIO'].nunique()}
+            return {'l100': 0, 'lts': 0, 'kms': 0, 'n': 0, 'patentes': []}
+        lts = sub['LITROS'].sum()
+        kms = sub['KM'].sum()
+        patentes_activas = sub['DOMINIO'].unique().tolist()
+        return {
+            'l100': round(lts / kms * 100, 2) if kms > 0 else 0,
+            'lts': lts,
+            'kms': kms,
+            'n': sub['DOMINIO'].nunique(),
+            'patentes': patentes_activas
+        }
 
-    tc1, tc2 = st.columns(2)
-    for col_t, marca, img_url, modelo in [
-        (tc1, 'IVECO',  IVECO_URL,  'S-Way 6x2'),
-        (tc2, 'SCANIA', SCANIA_URL, 'Serie P 2016')
-    ]:
-        s = stats_marca(marca)
+    # Determinar patentes Stralis (las que no son S-Way ni Scania)
+    todas_patentes = df['DOMINIO'].dropna().unique().tolist() if 'DOMINIO' in df.columns else []
+    stralis_patentes = [p for p in todas_patentes if p not in SWAY_PATENTES and p not in SCANIA_PATENTES]
+
+    s_sway    = stats_modelo(SWAY_PATENTES)
+    s_scania  = stats_modelo(SCANIA_PATENTES)
+    s_stralis = stats_modelo(stralis_patentes)
+
+    tc1, tc2, tc3 = st.columns(3)
+
+    modelos_config = [
+        (tc1, 'S-Way',   IVECO_URL,   s_sway,    SWAY_PATENTES,   'AH522SI · AH862UB · AH938VO · AH842GQ'),
+        (tc2, 'Scania',  SCANIA_URL,  s_scania,  SCANIA_PATENTES, 'AD247MQ · AE423IW'),
+        (tc3, 'Stralis', STRALIS_URL, s_stralis, stralis_patentes, 'Resto de la flota'),
+    ]
+
+    for col_t, modelo, img_url, s, pats, pats_label in modelos_config:
         with col_t:
-            st.markdown(f'<div class="truck-img-box"><img src="{img_url}" alt="{marca}" /></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="truck-img-box"><img src="{img_url}" alt="{modelo}" /></div>', unsafe_allow_html=True)
             st.markdown('<br>', unsafe_allow_html=True)
             sc1, sc2, sc3 = st.columns(3)
-            sc1.metric(f'{marca} — L/100km', f"{s['l100']:.1f}")
-            sc2.metric('Unidades',           f"{s['n']}")
-            sc3.metric('Litros {}'.format(anio_sel), f"{s['lts']:,.0f}")
-            st.caption(f"Modelo: {modelo} | {s['kms']:,.0f} km")
+            sc1.metric(f'{modelo} — L/100km', f"{s['l100']:.1f}" if s['l100'] > 0 else '—')
+            sc2.metric('Unidades', f"{s['n']}")
+            sc3.metric(f'Litros {anio_sel}', f"{s['lts']:,.0f}" if s['lts'] > 0 else '—')
+            st.caption(f"Patentes: {pats_label} | {s['kms']:,.0f} km")
 
     st.divider()
 
@@ -387,14 +452,14 @@ if pg == "Dashboard Principal":
     st.divider()
 
     with st.expander(f'Ver datos completos {anio_sel}'):
-        cols_s = [c for c in ['DOMINIO','MARCA','FECHA','KM','LITROS','L100KM','RALENTI'] if c in df.columns]
+        cols_s = [c for c in ['DOMINIO','MARCA','MODELO','FECHA','KM','LITROS','L100KM','RALENTI'] if c in df.columns]
         st.dataframe(df[cols_s], use_container_width=True, height=380)
 
     st.caption(f'Datos {anio_sel}: Google Sheets Expreso Diemar | Precio: {precio_fuente} | Actualización cada 10 min')
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  MODELO PREDICTIVO  (entrenado con TODO el histórico, predice meses futuros)
+#  MODELO PREDICTIVO
 # ══════════════════════════════════════════════════════════════════════════════
 elif pg == "Modelo Predictivo":
 
@@ -428,7 +493,6 @@ elif pg == "Modelo Predictivo":
         y_l100 = hist['L100'].values
         y_lts  = hist['LITROS'].values
 
-        # Grado 2 si hay suficientes puntos, sino 1
         degree = min(2, len(hist) - 1)
         poly   = PolynomialFeatures(degree=degree)
         Xp     = poly.fit_transform(X)
@@ -449,7 +513,6 @@ elif pg == "Modelo Predictivo":
 
         st.info(f'📐 Grado polinomial: {degree} | R² = {r2_l100:.3f} | σ residuos = {std_res:.2f} L/100km')
 
-        # ── Predicción por mes ────────────────────────────────────────────────
         st.markdown('<div class="sec-title">Predicción próximos 3 meses</div>', unsafe_allow_html=True)
         pc1, pc2, pc3 = st.columns(3)
         for c, mes, l100_p, lts_p in zip([pc1,pc2,pc3], meses_fut, pred_l100, pred_lts):
@@ -459,7 +522,6 @@ elif pg == "Modelo Predictivo":
 
         st.divider()
 
-        # ── Gráfico Plotly — histórico completo + predicción ─────────────────
         st.markdown('<div class="sec-title">Evolución histórica completa con Proyección</div>', unsafe_allow_html=True)
 
         all_labels = [str(p) for p in hist['MES_PERIODO']] + meses_fut
@@ -477,7 +539,6 @@ elif pg == "Modelo Predictivo":
         upper_clean = [upper_vals[i] for i in range(pred_start, len(all_labels))]
         lower_clean = [lower_vals[i] for i in range(pred_start, len(all_labels))]
 
-        # Colorear histórico por año
         hist_years = [p.year for p in hist['MES_PERIODO']]
         unique_years = sorted(set(hist_years))
         year_colors = {y: c for y, c in zip(unique_years, ['#94a3b8','#f97316','#ef4444','#22c55e','#60a5fa'])}
@@ -494,7 +555,6 @@ elif pg == "Modelo Predictivo":
             line=dict(color='#3b82f6',width=1,dash='dot'), name='CI inf',
             hovertemplate='CI inf: %{y:.2f} L/100km<extra></extra>'))
 
-        # Línea histórica completa
         hist_x = [all_labels[i] for i,v in enumerate(all_hist) if v is not None]
         hist_y = [v for v in all_hist if v is not None]
         fig.add_trace(go.Scatter(x=hist_x, y=hist_y, mode='lines+markers',
@@ -502,7 +562,6 @@ elif pg == "Modelo Predictivo":
             marker=dict(size=7,color='#ef4444',line=dict(color='#fff',width=1.5)),
             name='Histórico', hovertemplate='%{x}<br>Real: <b>%{y:.2f} L/100km</b><extra></extra>'))
 
-        # Línea predicción
         pred_x = [all_labels[i] for i,v in enumerate(all_pred) if v is not None]
         pred_y = [v for v in all_pred if v is not None]
         fig.add_trace(go.Scatter(x=pred_x, y=pred_y, mode='lines+markers',
@@ -510,7 +569,6 @@ elif pg == "Modelo Predictivo":
             marker=dict(size=9,color='#60a5fa',symbol='diamond',line=dict(color='#fff',width=1.5)),
             name='Predicción', hovertemplate='%{x}<br>Pred: <b>%{y:.2f} L/100km</b><extra></extra>'))
 
-        # Líneas verticales para separar años
         for yr in unique_years[1:]:
             yr_label = f'Ene {yr}'
             if yr_label in all_labels:
@@ -534,7 +592,6 @@ elif pg == "Modelo Predictivo":
 
         st.divider()
 
-        # ── Alerta de desvío ──────────────────────────────────────────────────
         st.markdown('<div class="sec-title">🚨 Alerta de Desvío — Predicción vs. Real</div>', unsafe_allow_html=True)
         if len(hist) >= 3:
             ultimo_real_mes  = str(hist['MES_PERIODO'].iloc[-1])
@@ -569,7 +626,6 @@ elif pg == "Modelo Predictivo":
 
         st.divider()
 
-        # ── Simulador What-If ─────────────────────────────────────────────────
         st.markdown('<div class="sec-title">🎨 Simulador What-If</div>', unsafe_allow_html=True)
         delta_precio_pct = st.slider(
             '💸 Variación precio combustible (%)',
@@ -632,7 +688,6 @@ else:
         st.warning('Sin datos disponibles.')
         st.stop()
 
-    # ── Tabla resumen por patente ─────────────────────────────────────────────
     resumen = df.groupby('DOMINIO').agg(
         LITROS_TOTAL=('LITROS', 'sum'),
         KM_TOTAL=('KM', 'sum'),
@@ -642,6 +697,9 @@ else:
     resumen['LITROS_PROM_MES'] = (resumen['LITROS_TOTAL'] / resumen['MESES'].replace(0, np.nan)).round(0)
     resumen = resumen[resumen['KM_TOTAL'] > 0].sort_values('L100KM_PROM', ascending=False)
 
+    # Agregar columna MODELO al resumen
+    resumen['MODELO'] = resumen['DOMINIO'].apply(asignar_modelo)
+
     if resumen.empty:
         st.warning('Sin datos suficientes para analizar patentes.')
         st.stop()
@@ -649,13 +707,12 @@ else:
     patente_max = resumen.iloc[0]
     patente_min = resumen.iloc[-1]
 
-    # ── Destacados ────────────────────────────────────────────────────────────
     st.markdown(f'<div class="sec-title">⚡ Destacados {anio_sel}</div>', unsafe_allow_html=True)
     hc1, hc2 = st.columns(2)
     with hc1:
         st.markdown(
             f'<div class="highlight-max">'
-            f'<b>🔴 Mayor consumo — {patente_max["DOMINIO"]}</b><br>'
+            f'<b>🔴 Mayor consumo — {patente_max["DOMINIO"]}</b> <span style="color:#94a3b8;font-size:.8rem;">({patente_max["MODELO"]})</span><br>'
             f'Promedio: <b>{patente_max["L100KM_PROM"]:.2f} L/100km</b> &nbsp;|&nbsp; '
             f'Total: <b>{patente_max["LITROS_TOTAL"]:,.0f} L</b> &nbsp;|&nbsp; '
             f'{patente_max["KM_TOTAL"]:,.0f} km &nbsp;|&nbsp; {int(patente_max["MESES"])} meses activa<br>'
@@ -664,7 +721,7 @@ else:
     with hc2:
         st.markdown(
             f'<div class="highlight-min">'
-            f'<b>🟢 Menor consumo — {patente_min["DOMINIO"]}</b><br>'
+            f'<b>🟢 Menor consumo — {patente_min["DOMINIO"]}</b> <span style="color:#94a3b8;font-size:.8rem;">({patente_min["MODELO"]})</span><br>'
             f'Promedio: <b>{patente_min["L100KM_PROM"]:.2f} L/100km</b> &nbsp;|&nbsp; '
             f'Total: <b>{patente_min["LITROS_TOTAL"]:,.0f} L</b> &nbsp;|&nbsp; '
             f'{patente_min["KM_TOTAL"]:,.0f} km &nbsp;|&nbsp; {int(patente_min["MESES"])} meses activa<br>'
@@ -673,7 +730,6 @@ else:
 
     st.divider()
 
-    # ── Gráfico barras: promedio L/100km por patente ──────────────────────────
     st.markdown(f'<div class="sec-title">Promedio L/100km por Patente — {anio_sel}</div>', unsafe_allow_html=True)
 
     colors_bar = []
@@ -712,7 +768,6 @@ else:
 
     st.divider()
 
-    # ── Heatmap: consumo mensual por patente ──────────────────────────────────
     st.markdown(f'<div class="sec-title">Consumo Mensual por Patente (L/100km) — {anio_sel}</div>', unsafe_allow_html=True)
 
     if 'MES_PERIODO' in df.columns:
@@ -766,7 +821,6 @@ else:
 
     st.divider()
 
-    # ── Detalle individual por patente ────────────────────────────────────────
     st.markdown('<div class="sec-title">🔍 Detalle Individual por Patente</div>', unsafe_allow_html=True)
     patentes_lista = resumen['DOMINIO'].tolist()
     pat_sel = st.selectbox('Seleccioná una patente para ver su evolución', patentes_lista)
@@ -783,13 +837,15 @@ else:
             l100_prom_pat = df_pat_mes['L100'].mean()
             lts_total_pat = df_pat_mes['LITROS'].sum()
             kms_total_pat = df_pat_mes['KM'].sum()
-            marca_pat = df_pat['MARCA'].iloc[0] if 'MARCA' in df_pat.columns else '—'
+            marca_pat  = df_pat['MARCA'].iloc[0]  if 'MARCA'  in df_pat.columns else '—'
+            modelo_pat = df_pat['MODELO'].iloc[0] if 'MODELO' in df_pat.columns else '—'
 
-            pk1, pk2, pk3, pk4 = st.columns(4)
-            pk1.metric('Patente', pat_sel)
-            pk2.metric('Marca', marca_pat)
-            pk3.metric('L/100km promedio', f'{l100_prom_pat:.2f}')
-            pk4.metric('Litros totales', f'{lts_total_pat:,.0f}')
+            pk1, pk2, pk3, pk4, pk5 = st.columns(5)
+            pk1.metric('Patente',          pat_sel)
+            pk2.metric('Marca',            marca_pat)
+            pk3.metric('Modelo',           modelo_pat)
+            pk4.metric('L/100km promedio', f'{l100_prom_pat:.2f}')
+            pk5.metric('Litros totales',   f'{lts_total_pat:,.0f}')
 
             fig_pat = go.Figure()
             fig_pat.add_trace(go.Bar(
@@ -833,10 +889,9 @@ else:
 
     st.divider()
 
-    # ── Tabla resumen completa ────────────────────────────────────────────────
     st.markdown(f'<div class="sec-title">Tabla Resumen — Todas las Patentes {anio_sel}</div>', unsafe_allow_html=True)
-    resumen_show = resumen[['DOMINIO','LITROS_TOTAL','KM_TOTAL','L100KM_PROM','LITROS_PROM_MES','MESES']].copy()
-    resumen_show.columns = ['Patente','Litros Total','KM Total','L/100km Prom','Litros/Mes Prom','Meses Activa']
+    resumen_show = resumen[['DOMINIO','MODELO','LITROS_TOTAL','KM_TOTAL','L100KM_PROM','LITROS_PROM_MES','MESES']].copy()
+    resumen_show.columns = ['Patente','Modelo','Litros Total','KM Total','L/100km Prom','Litros/Mes Prom','Meses Activa']
     resumen_show['Litros Total']    = resumen_show['Litros Total'].apply(lambda x: f'{x:,.0f}')
     resumen_show['KM Total']        = resumen_show['KM Total'].apply(lambda x: f'{x:,.0f}')
     resumen_show['Litros/Mes Prom'] = resumen_show['Litros/Mes Prom'].apply(lambda x: f'{x:,.0f}')
