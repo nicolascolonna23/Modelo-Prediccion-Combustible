@@ -16,9 +16,13 @@ st.set_page_config(
     layout="wide",
 )
 
-LOGO_URL  = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/logo_diemar4.png"
-IVECO_URL = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/S-Way-6x2-1.webp"
-SCANIA_URL= "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/2016p.png"
+LOGO_URL    = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/logo_diemar4.png"
+
+SWAY_URL    = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/S-Way-6x2-1.webp"
+
+SCANIA_URL  = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/2016p.png"
+
+STRALIS_URL = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/image.png"
 
 DARK_CSS = """
 <style>
@@ -211,7 +215,17 @@ df_full = df_raw.copy()
 anios_disponibles = sorted(df_full['FECHA'].dt.year.dropna().unique().tolist(), reverse=True) if 'FECHA' in df_full.columns else [2025]
 anio_sel = st.sidebar.selectbox('Año de visualización', anios_disponibles, index=0)
 
-df = df_full[df_full['FECHA'].dt.year == anio_sel].copy() if 'FECHA' in df_full.columns else df_full.copy()
+# ── Clasificación por MODELO (reemplaza lógica por marca) ──
+def clasificar_modelo(dom):
+    if dom in ["AH522SI", "AH862UB", "AH938VO", "AH842GQ"]:
+        return "S-WAY"
+    elif dom in ["AD247MQ", "AE423IW"]:
+        return "SCANIA"
+    else:
+        return "STRALIS"
+
+if 'DOMINIO' in df.columns:
+    df["MODELO"] = df["DOMINIO"].astype(str).str.upper().apply(clasificar_modelo)
 
 # ── Filtros sidebar ────────────────────────────────────────────────────────────
 if 'FECHA' in df.columns and df['FECHA'].notna().any():
@@ -324,20 +338,26 @@ if pg == "Dashboard Principal":
 
     st.divider()
 
-    st.markdown(f'<div class="sec-title">Rendimiento por Marca — {anio_sel}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sec-title">Rendimiento por Modelo — {anio_sel}</div>', unsafe_allow_html=True)
 
-    def stats_marca(marca):
-        sub = df[df['MARCA'].str.upper() == marca.upper()] if 'MARCA' in df.columns else pd.DataFrame()
-        if sub.empty:
-            return {'l100': 0, 'lts': 0, 'kms': 0, 'n': 0}
-        lts = sub['LITROS'].sum(); kms = sub['KM'].sum()
-        return {'l100': round(lts/kms*100, 2) if kms > 0 else 0, 'lts': lts, 'kms': kms, 'n': sub['DOMINIO'].nunique()}
+tc1, tc2, tc3 = st.columns(3)
 
-    tc1, tc2 = st.columns(2)
-    for col_t, marca, img_url, modelo in [
-        (tc1, 'IVECO',  IVECO_URL,  'S-Way 6x2'),
-        (tc2, 'SCANIA', SCANIA_URL, 'Serie P 2016')
-    ]:
+modelos_config = [
+    (tc1, 'S-WAY',   SWAY_URL,    'Iveco S-Way'),
+    (tc2, 'SCANIA',  SCANIA_URL,  'Scania P 2016'),
+    (tc3, 'STRALIS', STRALIS_URL, 'Iveco Stralis')
+]
+
+for col_t, modelo_key, img_url, modelo_nombre in modelos_config:
+    s = stats_modelo(modelo_key)
+    with col_t:
+        st.markdown(f'<div class="truck-img-box"><img src="{img_url}" /></div>', unsafe_allow_html=True)
+        st.markdown('<br>', unsafe_allow_html=True)
+        sc1, sc2, sc3 = st.columns(3)
+        sc1.metric(f'{modelo_key} — L/100km', f"{s['l100']:.1f}")
+        sc2.metric('Unidades', f"{s['n']}")
+        sc3.metric(f'Litros {anio_sel}', f"{s['lts']:,.0f}")
+        st.caption(f"{modelo_nombre} | {s['kms']:,.0f} km")
         s = stats_marca(marca)
         with col_t:
             st.markdown(f'<div class="truck-img-box"><img src="{img_url}" alt="{marca}" /></div>', unsafe_allow_html=True)
