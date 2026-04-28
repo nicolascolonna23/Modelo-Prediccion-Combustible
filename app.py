@@ -567,17 +567,6 @@ if pg == "Dashboard Principal":
                 else f'{ralenti_total:,.0f} L en ralentí')
     kpi(k6, 'kpi-amber', '⏱️ % Ralentí',        f'{ralenti_pct:.1f}%',    _ral_sub)
 
-    # ── KPI Velocidad ─────────────────────────────────────────────────────────
-    if total_excesos > 0:
-        st.markdown(f'<div class="sec-title">🚨 Excesos de Velocidad >88 km/h — {anio_sel}</div>', unsafe_allow_html=True)
-        v1, v2, v3, v4 = st.columns(4)
-        kpi(v1, 'kpi-red',    '🚨 Total excesos',      f'{total_excesos:,}',        f'eventos >{LIMITE_VELOCIDAD} km/h')
-        kpi(v2, 'kpi-red',    '💨 Vel. máx. registrada', f'{vel_max_global:.0f} km/h', f'+{vel_max_global-LIMITE_VELOCIDAD:.0f} km/h sobre el límite')
-        if unidad_mas_rapida:
-            _exc_top = int(df_vel_anio[df_vel_anio['DOMINIO']==unidad_mas_rapida].shape[0])
-            kpi(v3, 'kpi-red', '🔴 Unidad + excesos',  unidad_mas_rapida,           f'{_exc_top} eventos registrados')
-        excesos_x_unidad = df_vel_anio.groupby('DOMINIO').size().mean() if not df_vel_anio.empty and 'DOMINIO' in df_vel_anio.columns else 0
-        kpi(v4, 'kpi-amber',  '📊 Promedio por unidad', f'{excesos_x_unidad:.1f}',  'excesos/unidad en el período')
 
     st.divider()
 
