@@ -202,7 +202,7 @@ def cargar_velocidad():
             cl = c.lower()
             if   "movil"    in cl or "patente" in cl or "dominio" in cl: col_map[c] = "DOMINIO"
             elif "fecha"    in cl:                                         col_map[c] = "FECHA"
-            elif cl == "velocidad":                                        col_map[c] = "VELOCIDAD"
+            elif "veloc" in cl:                                            col_map[c] = "VELOCIDAD"
             elif "gravedad" in cl:                                         col_map[c] = "GRAVEDAD"
             elif "tipo"     in cl:                                         col_map[c] = "TIPO"
         df = df.rename(columns=col_map)
@@ -216,10 +216,27 @@ def cargar_velocidad():
                 .str.replace(",", ".", regex=False)
             )
             df["VELOCIDAD"] = pd.to_numeric(df["VELOCIDAD"], errors="coerce")
+        # Verificar que VELOCIDAD fue detectada; si no, intentar por posición numérica
+        if "VELOCIDAD" not in df.columns:
+            for c in df.columns:
+                try:
+                    serie = pd.to_numeric(df[c].astype(str).str.replace(",", ".", regex=False), errors="coerce")
+                    if serie.dropna().between(50, 200).mean() > 0.5:
+                        df = df.rename(columns={c: "VELOCIDAD"})
+                        break
+                except Exception:
+                    continue
+
+        if "VELOCIDAD" not in df.columns:
+            return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH"])
+
+        df["VELOCIDAD"] = pd.to_numeric(
+            df["VELOCIDAD"].astype(str).str.replace(",", ".", regex=False), errors="coerce"
+        )
         df = df[df["VELOCIDAD"] > LIMITE_VELOCIDAD].copy()
         df["EXCESO_KMH"] = (df["VELOCIDAD"] - LIMITE_VELOCIDAD).round(1)
         keep = [c for c in ["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH","GRAVEDAD","TIPO"] if c in df.columns]
-        return df[keep].dropna(subset=["DOMINIO"]).reset_index(drop=True)
+        return df[keep].dropna(subset=["DOMINIO","FECHA"]).reset_index(drop=True)
     except Exception as e:
         return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH"])
 
@@ -269,11 +286,15 @@ def asignar_modelo(dominio):
 def calcular_ier(df, df_vel=None):
     """
     Compara cada unidad contra el promedio de SU PROPIO MODELO.
-    Ponderación v3:
+    Ponderación v3 (con dato de ralentí):
         50 % → Consumo L/100 km   (menor = mejor)
         15 % → % Ralentí           (menor = mejor)
         15 % → Utilización km      (mayor = mejor)
         20 % → Excesos vel. >88    (menor = mejor — también impacta seguridad)
+    Ponderación v3b (sin dato de ralentí — redistribuida proporcionalmente):
+        58.8 % → Consumo L/100 km
+        17.6 % → Utilización km
+        23.5 % → Excesos vel. >88
     IER = 100 → igual al promedio · >100 → mejor · <100 → peor
     """
     if 'DOMINIO' not in df.columns or df.empty:
@@ -338,14 +359,25 @@ def calcular_ier(df, df_vel=None):
         return min(row['EXCESOS_MOD'] / row['EXCESOS'], 2.50)
     agg['SCORE_VEL'] = agg.apply(score_vel, axis=1).clip(0.40, 2.50)
 
-    # ── Ponderación v3: 50 / 15 / 15 / 20 ──────────────────────────────────
-    agg['IER'] = (
-        0.50 * agg['SCORE_CONSUMO'] +
-        0.15 * agg['SCORE_RALENTI'] +
-        0.15 * agg['SCORE_KM']      +
-        0.20 * agg['SCORE_VEL']
-    ) * 100
-    agg['IER'] = agg['IER'].round(1)
+    # ── Ponderación dinámica ─────────────────────────────────────────────────
+    # Si la unidad no reporta ralentí (RALENTI_PCT == 0), el 15% se redistribuye
+    # proporcionalmente entre los otros 3 componentes (50/85, 15/85, 20/85).
+    agg['TIENE_RALENTI'] = agg['RALENTI_PCT'] > 0
+
+    def calc_ier_row(row):
+        if row['TIENE_RALENTI']:
+            # Con ralentí: 50 / 15 / 15 / 20
+            return (0.5000 * row['SCORE_CONSUMO'] +
+                    0.1500 * row['SCORE_RALENTI'] +
+                    0.1500 * row['SCORE_KM']      +
+                    0.2000 * row['SCORE_VEL']) * 100
+        else:
+            # Sin ralentí: 58.8 / 17.6 / 23.5  (redistribuido proporcional)
+            return (0.5882 * row['SCORE_CONSUMO'] +
+                    0.1765 * row['SCORE_KM']      +
+                    0.2353 * row['SCORE_VEL']) * 100
+
+    agg['IER'] = agg.apply(calc_ier_row, axis=1).round(1)
 
     def clasif(v):
         if   v >= 105: return '🟢 Eficiente'
@@ -450,10 +482,15 @@ meses_hist_full = meses_hist_full[meses_hist_full['KM'] > 0].copy()
 n_meses_entrenamiento = len(meses_hist_full)
 
 # ── IER — respeta filtros del sidebar ─────────────────────────────────────────
+# Comparamos por MES (periodo), no por fecha exacta, para no cortar eventos
+# que ocurrieron después del último registro de telemetría del mes.
 if not df.empty and not df_vel_anio.empty and 'FECHA' in df_vel_anio.columns:
+    _mes_min = df['FECHA'].dropna().dt.to_period('M').min()
+    _mes_max = df['FECHA'].dropna().dt.to_period('M').max()
+    _vel_periodos = df_vel_anio['FECHA'].dropna().dt.to_period('M')
     df_vel_filtrado = df_vel_anio[
-        (df_vel_anio['FECHA'] >= df['FECHA'].min()) &
-        (df_vel_anio['FECHA'] <= df['FECHA'].max()) &
+        (_vel_periodos >= _mes_min) &
+        (_vel_periodos <= _mes_max) &
         (df_vel_anio['DOMINIO'].isin(df['DOMINIO'].unique()))
     ].copy()
 else:
@@ -610,11 +647,12 @@ if pg == "Dashboard Principal":
     <div class="ier-info-box">
     <b>¿Qué es el IER?</b> Métrica <b>equitativa</b>: cada camión se compara contra el promedio de
     <b>su propio modelo</b> — Stralis vs Stralis, S‑Way vs S‑Way, Scania vs Scania.<br>
-    <b>Componentes:</b>&nbsp;
-    <b>50 %</b> Consumo L/100 km &nbsp;·&nbsp;
-    <b>15 %</b> % Ralentí &nbsp;·&nbsp;
-    <b>15 %</b> Utilización km &nbsp;·&nbsp;
-    <b>20 %</b> Excesos de vel. &gt;{LIMITE_VELOCIDAD} km/h {'✅ <i>(datos cargados)</i>' if tiene_vel else '⚠️ <i>(sin datos aún)</i>'}<br>
+    <b>Ponderación con ralentí:</b>&nbsp;
+    <b>50 %</b> Consumo &nbsp;·&nbsp; <b>15 %</b> Ralentí &nbsp;·&nbsp; <b>15 %</b> KM &nbsp;·&nbsp;
+    <b>20 %</b> Vel. &gt;{LIMITE_VELOCIDAD} km/h {'✅' if tiene_vel else '⚠️'}<br>
+    <b>Ponderación sin ralentí</b> <i>(S‑Way — no reportan ese dato)</i><b>:</b>&nbsp;
+    <b>58.8 %</b> Consumo &nbsp;·&nbsp; <b>17.6 %</b> KM &nbsp;·&nbsp; <b>23.5 %</b> Vel. &gt;{LIMITE_VELOCIDAD} km/h
+    &nbsp;— el 15% de ralentí se redistribuye proporcionalmente.<br>
     <b>Escala:</b>&nbsp;
     🟢 Eficiente ≥ 105 &nbsp;·&nbsp; 🟡 Normal 95–105 &nbsp;·&nbsp;
     🟠 Atención 85–95 &nbsp;·&nbsp; 🔴 Crítico &lt; 85
@@ -688,11 +726,12 @@ if pg == "Dashboard Principal":
         with st.expander('📋 Ver tabla detallada IER (todos los componentes)'):
             show_cols = ['DOMINIO','MODELO','IER','CLASIFICACION',
                          'L100KM','L100KM_MOD','RALENTI_PCT','RAL_MOD',
-                         'EXCESOS','EXCESOS_MOD','VEL_MAX','KM']
+                         'EXCESOS','EXCESOS_MOD','VEL_MAX','KM','TIENE_RALENTI']
             ier_show = df_ier[show_cols].copy()
+            ier_show['TIENE_RALENTI'] = ier_show['TIENE_RALENTI'].map({True: '✅ Sí', False: '⚠️ No (redistribuida)'})
             ier_show.columns = ['Patente','Modelo','IER','Clasificación',
                                   'L/100km','Prom L/100km','% Ralentí','% Ral Prom',
-                                  f'Excesos >{LIMITE_VELOCIDAD}km/h','Prom Excesos Modelo','Vel. Máx (km/h)','KM']
+                                  f'Excesos >{LIMITE_VELOCIDAD}km/h','Prom Excesos Modelo','Vel. Máx (km/h)','KM','Pond. Ralentí']
             ier_show['IER']               = ier_show['IER'].round(1)
             ier_show['L/100km']           = ier_show['L/100km'].round(2)
             ier_show['Prom L/100km']      = ier_show['Prom L/100km'].round(2)
