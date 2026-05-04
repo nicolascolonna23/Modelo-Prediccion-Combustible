@@ -16,14 +16,13 @@ st.set_page_config(
     layout="wide",
 )
 
-LOGO_URL   = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/logo_diemar4.png"
-IVECO_URL  = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/S-Way-6x2-1.webp"
-SCANIA_URL = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/2016p.png"
-STRALIS_URL= "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/image.png"
+LOGO_URL    = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/logo_diemar4.png"
+IVECO_URL   = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/S-Way-6x2-1.webp"
+SCANIA_URL  = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/2016p.png"
+STRALIS_URL = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/image.png"
 
 SWAY_PATENTES   = ['AH522SI', 'AH862UB', 'AH938VO', 'AH842GQ']
 SCANIA_PATENTES = ['AD247MQ', 'AE423IW']
-
 LIMITE_VELOCIDAD = 88   # km/h — umbral de exceso satelital
 
 DARK_CSS = """
@@ -85,7 +84,6 @@ section[data-testid="stMain"] { background: #0f172a; }
 [data-testid="stSidebar"] [data-testid="stMultiSelect"] label {
     font-size:.78rem !important; color:#94a3b8 !important; font-weight:600 !important;
 }
-/* ── IER styles ── */
 .ier-info-box {
     background:#0f2744; border:1px solid #2563eb; border-radius:10px;
     padding:14px 18px; margin:10px 0; font-size:.85rem; color:#93c5fd; line-height:1.6;
@@ -124,13 +122,12 @@ st.sidebar.image(LOGO_URL, width=160)
 BASE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR35NkYPtJrOrdYHLGUH7GIW93s5cPAqQ0zEk5fP1c3gvErwbUW7HJ2OeWBYaBVsYKVmCf0yhLvs6eG/pub?output=csv"
 GID_TEL  = "0"
 GID_UNID = "882343299"
-GID_VEL  = "1563993963"   # ← pestaña excesos de velocidad satelital
+GID_VEL  = "1563993963"
 URL_TEL  = f"{BASE_URL}&gid={GID_TEL}"
 URL_UNID = f"{BASE_URL}&gid={GID_UNID}"
 URL_VEL  = f"{BASE_URL}&gid={GID_VEL}"
 
 
-# ── Carga telemetría + unidades ────────────────────────────────────────────────
 @st.cache_data(ttl=600)
 def cargar_datos():
     try:
@@ -183,6 +180,7 @@ def cargar_datos():
 
         if "EMPRESA" in df1.columns:
             df1 = df1[df1["EMPRESA"].str.upper().str.contains("LAD|DIEMAR", na=False)]
+
         if "DOMINIO" in df2.columns and not df2.empty:
             lad_units = df2["DOMINIO"].dropna().unique()
             if len(lad_units) > 0:
@@ -194,20 +192,11 @@ def cargar_datos():
         return pd.DataFrame(), pd.DataFrame()
 
 
-# ── Carga excesos de velocidad satelital ──────────────────────────────────────
 @st.cache_data(ttl=600)
 def cargar_velocidad():
-    """
-    Carga la pestaña de excesos de velocidad del satelital.
-    Columnas relevantes: Movil, Fecha del evento, velocidad, Gravedad
-    Filtra solo eventos con velocidad > LIMITE_VELOCIDAD (88 km/h).
-    Devuelve DataFrame con: DOMINIO, FECHA, VELOCIDAD, GRAVEDAD, EXCESO_KMH
-    """
     try:
         df = pd.read_csv(URL_VEL)
         df.columns = [str(c).strip() for c in df.columns]
-
-        # Normalizar nombre de columnas a los esperados
         col_map = {}
         for c in df.columns:
             cl = c.lower()
@@ -217,34 +206,21 @@ def cargar_velocidad():
             elif "gravedad" in cl:                                         col_map[c] = "GRAVEDAD"
             elif "tipo"     in cl:                                         col_map[c] = "TIPO"
         df = df.rename(columns=col_map)
-
-        # Normalizar DOMINIO → mayúsculas sin espacios
         if "DOMINIO" in df.columns:
             df["DOMINIO"] = df["DOMINIO"].astype(str).str.strip().str.upper()
-
-        # Parsear FECHA
         if "FECHA" in df.columns:
             df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce", dayfirst=True)
-
-        # Parsear VELOCIDAD (puede tener coma como separador decimal)
         if "VELOCIDAD" in df.columns:
             df["VELOCIDAD"] = (
                 df["VELOCIDAD"].astype(str)
                 .str.replace(",", ".", regex=False)
             )
             df["VELOCIDAD"] = pd.to_numeric(df["VELOCIDAD"], errors="coerce")
-
-        # Filtrar solo excesos reales > umbral
         df = df[df["VELOCIDAD"] > LIMITE_VELOCIDAD].copy()
-
-        # Calcular cuántos km/h por encima del límite
         df["EXCESO_KMH"] = (df["VELOCIDAD"] - LIMITE_VELOCIDAD).round(1)
-
         keep = [c for c in ["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH","GRAVEDAD","TIPO"] if c in df.columns]
         return df[keep].dropna(subset=["DOMINIO"]).reset_index(drop=True)
-
     except Exception as e:
-        # Si falla, devolver DataFrame vacío sin romper la app
         return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH"])
 
 
@@ -287,41 +263,30 @@ def asignar_modelo(dominio):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  ÍNDICE DE EFICIENCIA RELATIVA (IER)  — v2 con excesos de velocidad
+#  ÍNDICE DE EFICIENCIA RELATIVA (IER) — ponderación v3
+#  50% Consumo · 15% Ralentí · 15% Utilización km · 20% Excesos velocidad
 # ══════════════════════════════════════════════════════════════════════════════
 def calcular_ier(df, df_vel=None):
     """
     Compara cada unidad contra el promedio de SU PROPIO MODELO.
-    Stralis vs Stralis · S‑Way vs S‑Way · Scania vs Scania.
-
-    Ponderación v2 (con velocidad):
-        50 % → Consumo L/100 km   (relativo al modelo — menor = mejor)
-        20 % → % Ralentí           (relativo al modelo — menor = mejor)
-        15 % → Utilización km      (relativo al modelo — mayor = mejor)
-        15 % → Excesos de vel. >88 (relativo al modelo — menor = mejor)
-
+    Ponderación v3:
+        50 % → Consumo L/100 km   (menor = mejor)
+        15 % → % Ralentí           (menor = mejor)
+        15 % → Utilización km      (mayor = mejor)
+        20 % → Excesos vel. >88    (menor = mejor — también impacta seguridad)
     IER = 100 → igual al promedio · >100 → mejor · <100 → peor
-
-    Clasificación:
-        🟢 Eficiente  ≥ 105
-        🟡 Normal      95 – 105
-        🟠 Atención    85 –  95
-        🔴 Crítico      < 85
     """
     if 'DOMINIO' not in df.columns or df.empty:
         return pd.DataFrame()
-
     df_c = df[df['L100KM'] > 0].copy()
     if df_c.empty:
         return pd.DataFrame()
 
-    # 1. Agregar métricas por unidad
     agg_dict = {'L100KM': ('L100KM','mean'), 'KM': ('KM','sum'), 'LITROS': ('LITROS','sum')}
     if 'MES_PERIODO' in df_c.columns:
         agg_dict['MESES'] = ('MES_PERIODO','nunique')
     agg = df_c.groupby('DOMINIO').agg(**agg_dict).reset_index()
 
-    # 2. Ralentí % por unidad
     if 'RALENTI' in df_c.columns:
         ral = df_c.groupby('DOMINIO').agg(
             _RAL=('RALENTI','sum'), _LTS=('LITROS','sum')
@@ -332,7 +297,6 @@ def calcular_ier(df, df_vel=None):
         agg['RALENTI_PCT'] = 0
     agg['RALENTI_PCT'] = agg['RALENTI_PCT'].fillna(0)
 
-    # 3. Excesos de velocidad por unidad
     if df_vel is not None and not df_vel.empty and 'DOMINIO' in df_vel.columns:
         vel_counts = (
             df_vel.groupby('DOMINIO')
@@ -346,10 +310,8 @@ def calcular_ier(df, df_vel=None):
         agg['EXCESOS'] = 0
         agg['VEL_MAX'] = 0
 
-    # 4. Asignar modelo
     agg['MODELO'] = agg['DOMINIO'].apply(asignar_modelo)
 
-    # 5. Benchmark por modelo
     modelo_avgs = agg.groupby('MODELO').agg(
         L100KM_MOD  =('L100KM',    'mean'),
         KM_MOD      =('KM',        'mean'),
@@ -358,41 +320,33 @@ def calcular_ier(df, df_vel=None):
     ).reset_index()
     agg = agg.merge(modelo_avgs, on='MODELO', how='left')
 
-    # 6. Scores individuales (mayor = mejor en todos los casos)
-    # Consumo
     agg['SCORE_CONSUMO'] = (agg['L100KM_MOD'] / agg['L100KM'].replace(0, np.nan)).clip(0.40, 2.50)
 
-    # Ralentí
     agg['SCORE_RALENTI'] = np.where(
         (agg['RAL_MOD'] > 0) & (agg['RALENTI_PCT'] > 0),
         (agg['RAL_MOD'] / agg['RALENTI_PCT']).clip(0.40, 2.50),
         1.0
     )
 
-    # KM utilización
     agg['SCORE_KM'] = (agg['KM'] / agg['KM_MOD'].replace(0, np.nan)).clip(0.40, 2.50)
 
-    # Velocidad — 0 excesos = máximo bonus (2.0)
-    # Si el promedio del modelo también es 0, score neutro
     def score_vel(row):
         if row['EXCESOS_MOD'] == 0:
-            return 1.0   # todos sin excesos → neutro
+            return 1.0
         if row['EXCESOS'] == 0:
-            return 2.0   # esta unidad sin excesos → máximo bonus
+            return 2.0
         return min(row['EXCESOS_MOD'] / row['EXCESOS'], 2.50)
-
     agg['SCORE_VEL'] = agg.apply(score_vel, axis=1).clip(0.40, 2.50)
 
-    # 7. IER ponderado — 50 / 20 / 15 / 15
+    # ── Ponderación v3: 50 / 15 / 15 / 20 ──────────────────────────────────
     agg['IER'] = (
         0.50 * agg['SCORE_CONSUMO'] +
-        0.20 * agg['SCORE_RALENTI'] +
+        0.15 * agg['SCORE_RALENTI'] +
         0.15 * agg['SCORE_KM']      +
-        0.15 * agg['SCORE_VEL']
+        0.20 * agg['SCORE_VEL']
     ) * 100
     agg['IER'] = agg['IER'].round(1)
 
-    # 8. Clasificación semafórica
     def clasif(v):
         if   v >= 105: return '🟢 Eficiente'
         elif v >=  95: return '🟡 Normal'
@@ -406,14 +360,13 @@ def calcular_ier(df, df_vel=None):
             'SCORE_CONSUMO','SCORE_RALENTI','SCORE_KM','SCORE_VEL']
     if 'MESES' in agg.columns:
         keep.append('MESES')
-
     return agg[keep].sort_values('IER', ascending=False).reset_index(drop=True)
 
 
 # ── Carga inicial ──────────────────────────────────────────────────────────────
 with st.spinner('Cargando telemetría y velocidades...'):
     df_raw, df_unid = cargar_datos()
-    df_vel_raw      = cargar_velocidad()   # excesos satelitales (todos los años)
+    df_vel_raw      = cargar_velocidad()
 
 if df_raw.empty:
     st.warning('No se pudieron cargar datos.')
@@ -430,10 +383,8 @@ df_full = df_raw.copy()
 # Año de visualización
 anios_disponibles = sorted(df_full['FECHA'].dt.year.dropna().unique().tolist(), reverse=True) if 'FECHA' in df_full.columns else [2025]
 anio_sel = st.sidebar.selectbox('Año de visualización', anios_disponibles, index=0)
-df = df_full[df_full['FECHA'].dt.year == anio_sel].copy() if 'FECHA' in df_full.columns else df_full.copy()
 
-# Dataset del año sin filtros sidebar (benchmark IER completo)
-df_anio = df.copy()
+df = df_full[df_full['FECHA'].dt.year == anio_sel].copy() if 'FECHA' in df_full.columns else df_full.copy()
 
 # Velocidades filtradas por año
 if not df_vel_raw.empty and 'FECHA' in df_vel_raw.columns:
@@ -445,7 +396,6 @@ else:
 if 'FECHA' in df.columns and df['FECHA'].notna().any():
     st.sidebar.markdown("---")
     st.sidebar.markdown('<div class="sidebar-filter-header">🔍 Filtros</div>', unsafe_allow_html=True)
-
     periodos_disponibles = sorted(df['FECHA'].dt.to_period('M').dropna().unique().tolist())
     periodos_str = [str(p) for p in periodos_disponibles]
     if periodos_str:
@@ -472,7 +422,6 @@ if df.empty:
 
 df['MES_PERIODO'] = df['FECHA'].dt.to_period('M')
 df['MES_NUM']     = df['FECHA'].dt.month
-df_anio['MES_PERIODO'] = df_anio['FECHA'].dt.to_period('M')
 
 meses_df = df.groupby('MES_PERIODO').agg(
     LITROS=('LITROS','sum'), KM=('KM','sum')
@@ -500,15 +449,24 @@ meses_hist_full['L100'] = (meses_hist_full['LITROS'] / meses_hist_full['KM'].rep
 meses_hist_full = meses_hist_full[meses_hist_full['KM'] > 0].copy()
 n_meses_entrenamiento = len(meses_hist_full)
 
-# ── IER con velocidades ────────────────────────────────────────────────────────
-df_ier = calcular_ier(df_anio, df_vel_anio)
+# ── IER — respeta filtros del sidebar ─────────────────────────────────────────
+if not df.empty and not df_vel_anio.empty and 'FECHA' in df_vel_anio.columns:
+    df_vel_filtrado = df_vel_anio[
+        (df_vel_anio['FECHA'] >= df['FECHA'].min()) &
+        (df_vel_anio['FECHA'] <= df['FECHA'].max()) &
+        (df_vel_anio['DOMINIO'].isin(df['DOMINIO'].unique()))
+    ].copy()
+else:
+    df_vel_filtrado = df_vel_anio.copy()
 
-# ── Estadísticas de velocidad globales para el año ────────────────────────────
-total_excesos     = len(df_vel_anio) if not df_vel_anio.empty else 0
-vel_max_global    = df_vel_anio['VELOCIDAD'].max() if not df_vel_anio.empty and 'VELOCIDAD' in df_vel_anio.columns else 0
+df_ier = calcular_ier(df, df_vel_filtrado)
+
+# ── Estadísticas de velocidad globales (filtradas) ────────────────────────────
+total_excesos     = len(df_vel_filtrado) if not df_vel_filtrado.empty else 0
+vel_max_global    = df_vel_filtrado['VELOCIDAD'].max() if not df_vel_filtrado.empty and 'VELOCIDAD' in df_vel_filtrado.columns else 0
 unidad_mas_rapida = ''
-if not df_vel_anio.empty and 'DOMINIO' in df_vel_anio.columns:
-    _top = df_vel_anio.groupby('DOMINIO')['VELOCIDAD'].max().idxmax()
+if not df_vel_filtrado.empty and 'DOMINIO' in df_vel_filtrado.columns:
+    _top = df_vel_filtrado.groupby('DOMINIO')['VELOCIDAD'].max().idxmax()
     unidad_mas_rapida = _top
 
 
@@ -534,6 +492,7 @@ if pg == "Dashboard Principal":
 
     # ── KPIs ──────────────────────────────────────────────────────────────────
     st.markdown(f'<div class="sec-title">Métricas Globales — {anio_sel}</div>', unsafe_allow_html=True)
+
     lts_total   = df['LITROS'].sum() if 'LITROS' in df.columns else 0
     kms_total   = df['KM'].sum()     if 'KM'     in df.columns else 0
     l100_prom   = round(lts_total / kms_total * 100, 2) if kms_total > 0 else 0
@@ -567,10 +526,9 @@ if pg == "Dashboard Principal":
                 else f'{ralenti_total:,.0f} L en ralentí')
     kpi(k6, 'kpi-amber', '⏱️ % Ralentí',        f'{ralenti_pct:.1f}%',    _ral_sub)
 
-
     st.divider()
 
-    # ── Rendimiento por Modelo ──────────────────────────────────────────────
+    # ── Rendimiento por Modelo ────────────────────────────────────────────────
     st.markdown(f'<div class="sec-title">Rendimiento por Modelo — {anio_sel}</div>', unsafe_allow_html=True)
 
     def stats_modelo(patentes_lista):
@@ -605,7 +563,7 @@ if pg == "Dashboard Principal":
 
     st.divider()
 
-    # ── Ranking de Eficiencia ───────────────────────────────────────────────
+    # ── Ranking de Eficiencia ─────────────────────────────────────────────────
     st.markdown(f'<div class="sec-title">Ranking de Eficiencia — {anio_sel}</div>', unsafe_allow_html=True)
     rcol1, rcol2 = st.columns(2)
 
@@ -654,9 +612,9 @@ if pg == "Dashboard Principal":
     <b>su propio modelo</b> — Stralis vs Stralis, S‑Way vs S‑Way, Scania vs Scania.<br>
     <b>Componentes:</b>&nbsp;
     <b>50 %</b> Consumo L/100 km &nbsp;·&nbsp;
-    <b>20 %</b> % Ralentí &nbsp;·&nbsp;
+    <b>15 %</b> % Ralentí &nbsp;·&nbsp;
     <b>15 %</b> Utilización km &nbsp;·&nbsp;
-    <b>15 %</b> Excesos de vel. &gt;{LIMITE_VELOCIDAD} km/h {'✅ <i>(datos cargados)</i>' if tiene_vel else '⚠️ <i>(sin datos aún)</i>'}<br>
+    <b>20 %</b> Excesos de vel. &gt;{LIMITE_VELOCIDAD} km/h {'✅ <i>(datos cargados)</i>' if tiene_vel else '⚠️ <i>(sin datos aún)</i>'}<br>
     <b>Escala:</b>&nbsp;
     🟢 Eficiente ≥ 105 &nbsp;·&nbsp; 🟡 Normal 95–105 &nbsp;·&nbsp;
     🟠 Atención 85–95 &nbsp;·&nbsp; 🔴 Crítico &lt; 85
@@ -670,9 +628,11 @@ if pg == "Dashboard Principal":
         ic2.metric('🟡 Normal',    int(cats.get('🟡 Normal',   0)), 'IER 95–105')
         ic3.metric('🟠 Atención',  int(cats.get('🟠 Atención', 0)), 'IER 85–95')
         ic4.metric('🔴 Crítico',   int(cats.get('🔴 Crítico',  0)), 'IER < 85')
+
         st.markdown('<br>', unsafe_allow_html=True)
 
         MODELO_COLOR = {'S-Way':'#60a5fa','Scania':'#f97316','Stralis':'#a78bfa'}
+
         def ier_bar_color(v):
             if v>=105: return '#22c55e'
             elif v>=95: return '#f59e0b'
@@ -745,18 +705,19 @@ if pg == "Dashboard Principal":
         st.info('Sin datos suficientes para calcular el IER.')
 
     # ── Ranking excesos de velocidad ──────────────────────────────────────────
-    if not df_vel_anio.empty and 'DOMINIO' in df_vel_anio.columns:
+    if not df_vel_filtrado.empty and 'DOMINIO' in df_vel_filtrado.columns:
         st.divider()
         st.markdown(f'<div class="sec-title">🚨 Ranking Excesos de Velocidad >88 km/h — {anio_sel}</div>', unsafe_allow_html=True)
+
         vel_rank = (
-            df_vel_anio.groupby('DOMINIO')
+            df_vel_filtrado.groupby('DOMINIO')
             .agg(CANTIDAD=('DOMINIO','count'), VEL_MAX=('VELOCIDAD','max'), VEL_PROM=('VELOCIDAD','mean'))
             .reset_index()
             .sort_values('CANTIDAD', ascending=False)
         )
         vel_rank['MODELO'] = vel_rank['DOMINIO'].apply(asignar_modelo)
 
-        fig_vel = go.Figure(go.Bar(
+        fig_vel = go.Figure([go.Bar(
             x=vel_rank['DOMINIO'],
             y=vel_rank['CANTIDAD'],
             marker_color=['#ef4444' if v==vel_rank['CANTIDAD'].max() else '#f97316'
@@ -764,7 +725,7 @@ if pg == "Dashboard Principal":
             text=vel_rank['CANTIDAD'],
             textposition='outside', textfont=dict(color='#e2e8f0',size=10),
             hovertemplate='<b>%{x}</b><br>Excesos: %{y}<extra></extra>'
-        ))
+        )])
         fig_vel.update_layout(
             paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(30,41,59,0.6)',
             font=dict(color='#e2e8f0'),
@@ -785,6 +746,7 @@ if pg == "Dashboard Principal":
     with st.expander(f'Ver datos completos {anio_sel}'):
         cols_s = [c for c in ['DOMINIO','MARCA','MODELO','FECHA','KM','LITROS','L100KM','RALENTI'] if c in df.columns]
         st.dataframe(df[cols_s], use_container_width=True, height=380)
+
     st.caption(f'Datos {anio_sel}: Google Sheets Expreso Diemar | Precio: {precio_fuente} | Excesos: satelital >88 km/h | Actualización cada 10 min')
 
 
@@ -823,7 +785,6 @@ elif pg == "Modelo Predictivo":
         model_lts =LinearRegression().fit(Xp,y_lts)
         r2_l100=model_l100.score(Xp,y_l100)
         residuals=y_l100-model_l100.predict(Xp); std_res=np.std(residuals)
-
         t_max=hist['T'].max()
         t_fut=np.array([t_max+1,t_max+2,t_max+3]).reshape(-1,1)
         Xf=poly.transform(t_fut)
@@ -834,6 +795,7 @@ elif pg == "Modelo Predictivo":
 
         st.info(f'📐 Grado polinomial: {degree} | R² = {r2_l100:.3f} | σ residuos = {std_res:.2f} L/100km')
         st.markdown('<div class="sec-title">Predicción próximos 3 meses</div>', unsafe_allow_html=True)
+
         pc1,pc2,pc3=st.columns(3)
         for c,mes,l100_p,lts_p in zip([pc1,pc2,pc3],meses_fut,pred_l100,pred_lts):
             costo_p=lts_p*precio_gasoil
@@ -858,16 +820,20 @@ elif pg == "Modelo Predictivo":
             fill='toself',fillcolor='rgba(59,130,246,0.15)',line=dict(color='rgba(0,0,0,0)'),name='Intervalo ±1.5σ',hoverinfo='skip'))
         fig.add_trace(go.Scatter(x=pred_labels,y=upper_clean,mode='lines',line=dict(color='#3b82f6',width=1,dash='dot'),name='CI sup',hovertemplate='CI sup: %{y:.2f} L/100km<extra></extra>'))
         fig.add_trace(go.Scatter(x=pred_labels,y=lower_clean,mode='lines',line=dict(color='#3b82f6',width=1,dash='dot'),name='CI inf',hovertemplate='CI inf: %{y:.2f} L/100km<extra></extra>'))
+
         hist_x=[all_labels[i] for i,v in enumerate(all_hist) if v is not None]
         hist_y=[v for v in all_hist if v is not None]
         fig.add_trace(go.Scatter(x=hist_x,y=hist_y,mode='lines+markers',line=dict(color='#ef4444',width=2.5),marker=dict(size=7,color='#ef4444',line=dict(color='#fff',width=1.5)),name='Histórico',hovertemplate='%{x}<br>Real: <b>%{y:.2f} L/100km</b><extra></extra>'))
+
         pred_x=[all_labels[i] for i,v in enumerate(all_pred) if v is not None]
         pred_y=[v for v in all_pred if v is not None]
         fig.add_trace(go.Scatter(x=pred_x,y=pred_y,mode='lines+markers',line=dict(color='#60a5fa',width=2.5,dash='dash'),marker=dict(size=9,color='#60a5fa',symbol='diamond',line=dict(color='#fff',width=1.5)),name='Predicción',hovertemplate='%{x}<br>Pred: <b>%{y:.2f} L/100km</b><extra></extra>'))
+
         for yr in unique_years[1:]:
             yr_label=f'Ene {yr}'
             if yr_label in all_labels:
                 fig.add_vline(x=yr_label,line_width=1,line_dash="dot",line_color="#334155",annotation_text=str(yr),annotation_position="top",annotation_font_color="#64748b",annotation_font_size=10)
+
         fig.update_layout(
             paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0',family='sans-serif'),
             legend=dict(bgcolor='rgba(15,23,42,0.8)',bordercolor='#334155',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
@@ -879,6 +845,7 @@ elif pg == "Modelo Predictivo":
 
         st.divider()
         st.markdown('<div class="sec-title">🚨 Alerta de Desvío — Predicción vs. Real</div>', unsafe_allow_html=True)
+
         if len(hist) >= 3:
             ultimo_real_mes =str(hist['MES_PERIODO'].iloc[-1])
             ultimo_real_l100=float(hist['L100'].iloc[-1])
@@ -899,8 +866,10 @@ elif pg == "Modelo Predictivo":
 
         st.divider()
         st.markdown('<div class="sec-title">🎨 Simulador What-If</div>', unsafe_allow_html=True)
+
         delta_precio_pct=st.slider('💸 Variación precio combustible (%)',min_value=-30,max_value=50,value=0,step=1)
         precio_sim=precio_gasoil*(1+delta_precio_pct/100)
+
         wf1,wf2=st.columns(2)
         with wf1:
             st.markdown('<div class="kpi-card kpi-amber"><div class="kpi-label">Precio Simulado</div><div class="kpi-value">${:,.0f}/L</div><div class="kpi-sub">{:+.1f}% vs hoy</div></div>'.format(precio_sim,delta_precio_pct),unsafe_allow_html=True)
@@ -908,10 +877,19 @@ elif pg == "Modelo Predictivo":
             costo_sim_m1=pred_lts[0]*precio_sim/1e6; costo_base_m1=pred_lts[0]*precio_gasoil/1e6; diff_costo=costo_sim_m1-costo_base_m1
             color_wf2='kpi-red' if diff_costo>0 else 'kpi-green'
             st.markdown(f'<div class="kpi-card {color_wf2}"><div class="kpi-label">Costo {meses_fut[0]}</div><div class="kpi-value">${costo_sim_m1:.2f}M</div><div class="kpi-sub">{diff_costo:+.2f}M vs base</div></div>',unsafe_allow_html=True)
-        cost_df=pd.DataFrame({'Mes':meses_fut,'L/100km pred.':[round(v,2) for v in pred_l100],'Litros est.':[round(v,0) for v in pred_lts],'Costo base M$':[round(v*precio_gasoil/1e6,2) for v in pred_lts],'Costo simulado M$':[round(v*precio_sim/1e6,2) for v in pred_lts],'Dif. M$':[round(v*(precio_sim-precio_gasoil)/1e6,2) for v in pred_lts]})
+
+        cost_df=pd.DataFrame({
+            'Mes':meses_fut,
+            'L/100km pred.':[round(v,2) for v in pred_l100],
+            'Litros est.':[round(v,0) for v in pred_lts],
+            'Costo base M$':[round(v*precio_gasoil/1e6,2) for v in pred_lts],
+            'Costo simulado M$':[round(v*precio_sim/1e6,2) for v in pred_lts],
+            'Dif. M$':[round(v*(precio_sim-precio_gasoil)/1e6,2) for v in pred_lts]
+        })
         st.dataframe(cost_df, use_container_width=True, hide_index=True)
     else:
         st.info('Se necesitan al menos 2 meses de datos históricos para el modelo predictivo.')
+
     st.caption(f'Modelo entrenado con {n_meses_entrenamiento} meses | Precio: {precio_fuente} | Actualización cada 10 min')
 
 
@@ -962,6 +940,7 @@ else:
 
     st.divider()
     st.markdown(f'<div class="sec-title">Promedio L/100km por Patente — {anio_sel}</div>', unsafe_allow_html=True)
+
     colors_bar=[('#ef4444' if r['DOMINIO']==patente_max['DOMINIO'] else ('#22c55e' if r['DOMINIO']==patente_min['DOMINIO'] else '#3b82f6')) for _,r in resumen.iterrows()]
     fig_bar=go.Figure([go.Bar(x=resumen['DOMINIO'],y=resumen['L100KM_PROM'],marker_color=colors_bar,
         text=resumen['L100KM_PROM'].apply(lambda v:f'{v:.1f}'),textposition='outside',textfont=dict(color='#e2e8f0',size=10),
@@ -978,6 +957,7 @@ else:
 
     st.divider()
     st.markdown(f'<div class="sec-title">Consumo Mensual por Patente (L/100km) — {anio_sel}</div>', unsafe_allow_html=True)
+
     if 'MES_PERIODO' in df.columns:
         pivot=df[df['L100KM']>0].groupby(['DOMINIO','MES_PERIODO'])['L100KM'].mean().round(2).reset_index()
         pivot['MES_STR']=pivot['MES_PERIODO'].astype(str)
@@ -1021,14 +1001,12 @@ else:
             pk1.metric('Patente', pat_sel); pk2.metric('Marca', marca_pat); pk3.metric('Modelo', modelo_pat)
             pk4.metric('L/100km promedio', f'{l100_prom_pat:.2f}'); pk5.metric('Litros totales', f'{lts_total_pat:,.0f}')
 
-            # ── IER y velocidad de esta patente ───────────────────────────────
+            # ── IER de esta patente ────────────────────────────────────────────
             if not df_ier.empty and pat_sel in df_ier['DOMINIO'].values:
                 ier_row=df_ier[df_ier['DOMINIO']==pat_sel].iloc[0]
                 st.markdown('<div class="sec-title">📊 Índice de Eficiencia Relativa (IER)</div>', unsafe_allow_html=True)
-
                 ier_v=ier_row['IER']
                 sc_color=('#22c55e' if ier_v>=105 else ('#f59e0b' if ier_v>=95 else ('#f97316' if ier_v>=85 else '#ef4444')))
-
                 ia1,ia2,ia3=st.columns([1,2,2])
                 with ia1:
                     st.markdown(f'<div class="ier-gauge-wrap"><div class="kpi-label">IER</div><div class="ier-score-big" style="color:{sc_color};">{ier_v:.1f}</div><div class="ier-clasif">{ier_row["CLASIFICACION"]}</div><div style="font-size:.72rem;color:#64748b;margin-top:6px;">base 100 = prom. modelo</div></div>',unsafe_allow_html=True)
@@ -1038,21 +1016,20 @@ else:
                         pct=min(int(score*50),100); bc='#22c55e' if score>=1 else '#ef4444'
                         st.markdown(f'<div class="ier-comp-row"><div class="ier-comp-label">{label} <span style="color:#475569;">({peso}%)</span></div><div class="ier-comp-bar-bg"><div class="ier-comp-bar" style="width:{pct}%;background:{bc}"></div></div><div class="ier-comp-val" style="color:{bc};">{score*100:.0f}</div></div>',unsafe_allow_html=True)
                     comp_bar('⛽ Consumo',      ier_row['SCORE_CONSUMO'], 50)
-                    comp_bar('⏱️ Ralentí',      ier_row['SCORE_RALENTI'], 20)
+                    comp_bar('⏱️ Ralentí',      ier_row['SCORE_RALENTI'], 15)
                     comp_bar('🛣️ Utilización', ier_row['SCORE_KM'],      15)
-                    comp_bar(f'🚨 Vel. >{LIMITE_VELOCIDAD}km/h', ier_row['SCORE_VEL'], 15)
+                    comp_bar(f'🚨 Vel. >{LIMITE_VELOCIDAD}km/h', ier_row['SCORE_VEL'], 20)
                 with ia3:
                     st.markdown(f'<div style="font-size:.8rem;color:#94a3b8;font-weight:600;margin-bottom:6px;">Esta unidad vs. promedio {modelo_pat}</div>',unsafe_allow_html=True)
                     delta_l100=ier_row['L100KM']-ier_row['L100KM_MOD']
                     delta_ral =ier_row['RALENTI_PCT']-ier_row['RAL_MOD']
-                    delta_km  =ier_row['KM']-ier_row['KM_MOD']
                     delta_exc =int(ier_row['EXCESOS'])-ier_row['EXCESOS_MOD']
                     st.metric('L/100km',f"{ier_row['L100KM']:.2f}",f"{delta_l100:+.2f} vs prom. {modelo_pat} ({ier_row['L100KM_MOD']:.2f})",delta_color='inverse')
                     st.metric('% Ralentí',f"{ier_row['RALENTI_PCT']:.1f}%",f"{delta_ral:+.1f}pp vs prom. {modelo_pat} ({ier_row['RAL_MOD']:.1f}%)",delta_color='inverse')
                     st.metric(f'Excesos >{LIMITE_VELOCIDAD} km/h',f"{int(ier_row['EXCESOS'])} eventos",f"{delta_exc:+.1f} vs prom. {modelo_pat} ({ier_row['EXCESOS_MOD']:.1f})",delta_color='inverse')
 
             # ── Historial de velocidades de esta patente ───────────────────────
-            df_vel_pat=df_vel_anio[df_vel_anio['DOMINIO']==pat_sel] if not df_vel_anio.empty else pd.DataFrame()
+            df_vel_pat=df_vel_filtrado[df_vel_filtrado['DOMINIO']==pat_sel] if not df_vel_filtrado.empty else pd.DataFrame()
             if not df_vel_pat.empty:
                 st.markdown(f'<div class="sec-title">🚨 Excesos de Velocidad >88 km/h — {pat_sel} ({anio_sel})</div>', unsafe_allow_html=True)
                 vp1,vp2,vp3=st.columns(3)
