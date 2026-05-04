@@ -312,7 +312,15 @@ def calcular_ier(df, df_vel=None):
         ral = df_c.groupby('DOMINIO').agg(
             _RAL=('RALENTI','sum'), _LTS=('LITROS','sum')
         ).reset_index()
-        ral['RALENTI_PCT'] = (ral['_RAL'] / ral['_LTS'].replace(0, np.nan) * 100).fillna(0).round(2)
+        ral['_RATIO'] = ral['_RAL'] / ral['_LTS'].replace(0, np.nan)
+        # Si el ratio > 1 el dato de ralentí no está en litros (ej: horas, minutos)
+        # → se trata como sin dato válido para no distorsionar el IER
+        ral['RALENTI_PCT'] = np.where(
+            ral['_RATIO'] <= 1.0,
+            (ral['_RATIO'] * 100).round(2),
+            0.0
+        )
+        ral['RALENTI_PCT'] = ral['RALENTI_PCT'].fillna(0)
         agg = agg.merge(ral[['DOMINIO','RALENTI_PCT']], on='DOMINIO', how='left')
     else:
         agg['RALENTI_PCT'] = 0
@@ -389,7 +397,8 @@ def calcular_ier(df, df_vel=None):
     keep = ['DOMINIO','MODELO','IER','CLASIFICACION',
             'L100KM','L100KM_MOD','RALENTI_PCT','RAL_MOD',
             'KM','KM_MOD','LITROS','EXCESOS','VEL_MAX','EXCESOS_MOD',
-            'SCORE_CONSUMO','SCORE_RALENTI','SCORE_KM','SCORE_VEL']
+            'SCORE_CONSUMO','SCORE_RALENTI','SCORE_KM','SCORE_VEL',
+            'TIENE_RALENTI']
     if 'MESES' in agg.columns:
         keep.append('MESES')
     return agg[keep].sort_values('IER', ascending=False).reset_index(drop=True)
