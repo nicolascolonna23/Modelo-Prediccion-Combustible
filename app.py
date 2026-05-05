@@ -825,26 +825,37 @@ elif pg == "Modelo Predictivo":
         r2_l100=model_l100.score(Xp,y_l100)
         residuals=y_l100-model_l100.predict(Xp); std_res=np.std(residuals)
         t_max=hist['T'].max()
-        t_fut=np.array([t_max+1,t_max+2,t_max+3]).reshape(-1,1)
+        ultimo=hist['MES_PERIODO'].iloc[-1]
+        # Meses que faltan hasta diciembre del año que contiene el último dato
+        _meses_restantes = 12 - ultimo.month
+        n_pred = max(3, _meses_restantes)
+        t_fut=np.array(range(t_max+1, t_max+1+n_pred)).reshape(-1,1)
         Xf=poly.transform(t_fut)
         pred_l100=np.clip(model_l100.predict(Xf),0,100)
         pred_lts =np.clip(model_lts.predict(Xf),0,None)
-        ultimo=hist['MES_PERIODO'].iloc[-1]
-        meses_fut=[(ultimo+i+1).strftime('%b %Y') for i in range(3)]
+        meses_fut=[(ultimo+i+1).strftime('%b %Y') for i in range(n_pred)]
 
         st.info(f'📐 Grado polinomial: {degree} | R² = {r2_l100:.3f} | σ residuos = {std_res:.2f} L/100km')
-        st.markdown('<div class="sec-title">Predicción próximos 3 meses</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="sec-title">Predicción meses restantes {ultimo.year} ({n_pred} meses)</div>', unsafe_allow_html=True)
 
-        pc1,pc2,pc3=st.columns(3)
-        for c,mes,l100_p,lts_p in zip([pc1,pc2,pc3],meses_fut,pred_l100,pred_lts):
+        # KPI cards: mostrar hasta 4 por fila, primera fila
+        n_kpi = min(4, n_pred)
+        kpi_cols = st.columns(n_kpi)
+        for c,mes,l100_p,lts_p in zip(kpi_cols, meses_fut[:n_kpi], pred_l100[:n_kpi], pred_lts[:n_kpi]):
             costo_p=lts_p*precio_gasoil
             c.metric(label=f'Predicción {mes}',value=f'{l100_p:.2f} L/100km',delta=f'{lts_p:,.0f} L | ${costo_p/1e6:.2f}M')
+        # Si hay más de 4 meses predichos, mostrar segunda fila
+        if n_pred > 4:
+            kpi_cols2 = st.columns(min(4, n_pred-4))
+            for c,mes,l100_p,lts_p in zip(kpi_cols2, meses_fut[4:], pred_l100[4:], pred_lts[4:]):
+                costo_p=lts_p*precio_gasoil
+                c.metric(label=f'Predicción {mes}',value=f'{l100_p:.2f} L/100km',delta=f'{lts_p:,.0f} L | ${costo_p/1e6:.2f}M')
 
         st.divider()
         st.markdown('<div class="sec-title">Evolución histórica completa con Proyección</div>', unsafe_allow_html=True)
 
         all_labels=[str(p) for p in hist['MES_PERIODO']]+meses_fut
-        all_hist  =hist['L100'].tolist()+[None,None,None]
+        all_hist  =hist['L100'].tolist()+[None]*n_pred
         all_pred  =[None]*(len(hist)-1)+[float(hist['L100'].iloc[-1])]+[float(v) for v in pred_l100]
         upper_vals=([None]*(len(hist)-1)+[float(hist['L100'].iloc[-1])+1.5*std_res]+[float(v)+1.5*std_res for v in pred_l100])
         lower_vals=([None]*(len(hist)-1)+[float(hist['L100'].iloc[-1])-1.5*std_res]+[float(v)-1.5*std_res for v in pred_l100])
