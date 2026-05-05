@@ -170,13 +170,9 @@ def cargar_datos():
         if "L100KM" not in df1.columns and "LITROS" in df1.columns and "KM" in df1.columns:
             df1["L100KM"] = (df1["LITROS"] / df1["KM"].replace(0, np.nan) * 100).round(2)
 
-        extra = [c for c in ["DOMINIO", "RALENTI"] if c in df2.columns]
-        if len(extra) > 1:
-            df2r = df2[extra].groupby("DOMINIO").sum(numeric_only=True).reset_index()
-            df1  = pd.merge(df1, df2r, on="DOMINIO", how="left", suffixes=("", "_u"))
-            if "RALENTI_u" in df1.columns:
-                df1["RALENTI"] = df1["RALENTI"].combine_first(df1["RALENTI_u"])
-                df1.drop(columns=["RALENTI_u"], inplace=True)
+        # No mergeamos RALENTI desde df2: df2 tiene el acumulado anual por unidad,
+        # y al mergearlo a cada fila mensual de df1 genera porcentajes incorrectos.
+        # df1 (telemetría) ya trae RALENTI en litros por período — usamos solo ese dato.
 
         if "EMPRESA" in df1.columns:
             df1 = df1[df1["EMPRESA"].str.upper().str.contains("LAD|DIEMAR", na=False)]
@@ -313,8 +309,7 @@ def calcular_ier(df, df_vel=None):
             _RAL=('RALENTI','sum'), _LTS=('LITROS','sum')
         ).reset_index()
         ral['_RATIO'] = ral['_RAL'] / ral['_LTS'].replace(0, np.nan)
-        # Si el ratio > 1 el dato de ralentí no está en litros (ej: horas, minutos)
-        # → se trata como sin dato válido para no distorsionar el IER
+        # Si el ratio > 1.0 el dato no está en litros o es inválido → descartamos
         ral['RALENTI_PCT'] = np.where(
             ral['_RATIO'] <= 1.0,
             (ral['_RATIO'] * 100).round(2),
