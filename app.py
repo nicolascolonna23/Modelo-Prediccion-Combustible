@@ -170,9 +170,28 @@ def cargar_datos():
         if "L100KM" not in df1.columns and "LITROS" in df1.columns and "KM" in df1.columns:
             df1["L100KM"] = (df1["LITROS"] / df1["KM"].replace(0, np.nan) * 100).round(2)
 
-        # No mergeamos RALENTI desde df2: df2 tiene el acumulado anual por unidad,
-        # y al mergearlo a cada fila mensual de df1 genera porcentajes incorrectos.
-        # df1 (telemetría) ya trae RALENTI en litros por período — usamos solo ese dato.
+        # Merge RALENTI desde df2 emparejando por DOMINIO + mes.
+        # El merge por DOMINIO solo sumaba todos los períodos y los pegaba en cada fila
+        # (acumulado anual ÷ litros de un mes = % irreal).
+        if 'RALENTI' in df2.columns and 'DOMINIO' in df2.columns:
+            if 'FECHA' in df2.columns and 'FECHA' in df1.columns:
+                # Merge por período: DOMINIO + mes — trae el ralentí del mes correcto
+                df2_ral = df2[['DOMINIO','FECHA','RALENTI']].copy()
+                df2_ral = df2_ral[df2_ral['RALENTI'] > 0]
+                df2_ral['_MES'] = df2_ral['FECHA'].dt.to_period('M')
+                df1['_MES'] = df1['FECHA'].dt.to_period('M')
+                df1 = df1.merge(
+                    df2_ral[['DOMINIO','_MES','RALENTI']].rename(columns={'RALENTI':'_RAL_u'}),
+                    on=['DOMINIO','_MES'], how='left'
+                )
+                if 'RALENTI' not in df1.columns:
+                    df1['RALENTI'] = df1['_RAL_u'].fillna(0)
+                else:
+                    df1['RALENTI'] = df1['RALENTI'].combine_first(df1['_RAL_u']).fillna(0)
+                df1.drop(columns=['_RAL_u','_MES'], inplace=True, errors='ignore')
+            else:
+                # df2 no tiene FECHA → no podemos cruzar por período, ignoramos
+                pass
 
         if "EMPRESA" in df1.columns:
             df1 = df1[df1["EMPRESA"].str.upper().str.contains("LAD|DIEMAR", na=False)]
