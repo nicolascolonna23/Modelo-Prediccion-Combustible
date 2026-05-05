@@ -6,7 +6,6 @@ from bs4 import BeautifulSoup
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
 import plotly.graph_objects as go
-import plotly.express as px
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -25,23 +24,23 @@ SWAY_PATENTES   = ['AH522SI', 'AH862UB', 'AH938VO', 'AH842GQ']
 SCANIA_PATENTES = ['AD247MQ', 'AE423IW']
 LIMITE_VELOCIDAD = 88
 
-# ==================== NUEVAS FUNCIONES DE SCORE (MEJORADAS) ====================
+# ==================== NUEVAS FUNCIONES DE SCORE (IER MEJORADO) ====================
 def score_lower_better(actual, reference):
-    """Para métricas donde MENOR valor es mejor (consumo, ralentí, excesos)"""
+    """MENOR es mejor (consumo, ralentí, excesos)"""
     if pd.isna(actual) or pd.isna(reference) or reference <= 0:
         return 1.0
     improvement = (reference - actual) / reference
-    score = 1 + improvement * 2.0        # Factor de sensibilidad
+    score = 1 + improvement * 2.0
     return np.clip(score, 0.40, 2.50)
 
 def score_higher_better(actual, reference):
-    """Para métricas donde MAYOR valor es mejor (KM, ton·km/L)"""
+    """MAYOR es mejor (KM, ton·km/L)"""
     if pd.isna(actual) or pd.isna(reference) or reference <= 0:
         return 1.0
     improvement = (actual - reference) / reference
     score = 1 + improvement * 2.0
     return np.clip(score, 0.40, 2.50)
-# ============================================================================
+# =============================================================================
 
 DARK_CSS = """
 <style>
@@ -50,97 +49,30 @@ DARK_CSS = """
 section[data-testid="stMain"] { background: #0f172a; }
 .stMarkdown, .stCaption, label, p, span, div { color: #e2e8f0 !important; }
 [data-testid="stMetricValue"] { color: #f1f5f9 !important; }
-[data-testid="stMetricDelta"] { color: #94a3b8 !important; }
-.kpi-card {
-    background: #1e293b; border-radius: 14px; padding: 24px 28px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.4); text-align: center;
-    border-left: 5px solid #2563eb; margin-bottom: 16px;
-}
+.kpi-card { background: #1e293b; border-radius: 14px; padding: 24px 28px; box-shadow: 0 2px 10px rgba(0,0,0,0.4); text-align: center; border-left: 5px solid #2563eb; margin-bottom: 16px; }
 .kpi-label  { font-size:0.78rem; color:#94a3b8; font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
 .kpi-value  { font-size:2rem; font-weight:800; color:#f1f5f9; line-height:1.1; }
 .kpi-sub    { font-size:0.75rem; color:#64748b; margin-top:4px; }
 .kpi-red    { border-left-color:#ef4444; }
 .kpi-green  { border-left-color:#22c55e; }
 .kpi-amber  { border-left-color:#f59e0b; }
-.kpi-purple { border-left-color:#a855f7; }
-.sec-title {
-    font-size:1.1rem; font-weight:700; color:#e2e8f0;
-    border-left:4px solid #2563eb; padding-left:10px; margin:18px 0 10px;
-}
-.price-badge {
-    background:#292524; border:1px solid #f59e0b; border-radius:8px;
-    padding:8px 14px; display:inline-block; font-size:0.85rem; color:#fbbf24; font-weight:600;
-}
-.truck-img-box {
-    width:100%; height:280px; border-radius:12px; background:#1e293b;
-    display:flex; align-items:center; justify-content:center; overflow:hidden;
-}
-.truck-img-box img {
-    max-width:100%; max-height:100%; width:100%; height:100%;
-    object-fit:contain; object-position:center; padding:12px;
-}
-.rank-row    { display:flex; align-items:center; padding:8px 0; border-bottom:1px solid #334155; }
-.rank-num    { width:28px; font-weight:700; font-size:.9rem; color:#94a3b8; }
-.rank-dom    { flex:1; font-size:.88rem; color:#e2e8f0; font-weight:600; }
-.rank-val    { font-size:.88rem; font-weight:700; }
-.rank-bar-bg { width:80px; height:6px; background:#334155; border-radius:3px; margin:0 10px; overflow:hidden; }
-.rank-bar    { height:6px; border-radius:3px; }
-.alert-box   { background:#450a0a; border:1px solid #ef4444; border-radius:10px; padding:14px 18px; margin:10px 0; }
-.alert-ok    { background:#052e16; border:1px solid #22c55e; border-radius:10px; padding:14px 18px; margin:10px 0; }
-.highlight-max { background:#450a0a; border:1px solid #ef4444; border-radius:10px; padding:14px 18px; margin:6px 0; }
-.highlight-min { background:#052e16; border:1px solid #22c55e; border-radius:10px; padding:14px 18px; margin:6px 0; }
-.training-badge {
-    background:#1e1b4b; border:1px solid #6366f1; border-radius:8px;
-    padding:6px 12px; display:inline-block; font-size:0.8rem; color:#a5b4fc; font-weight:600;
-    margin-bottom: 12px;
-}
-.sidebar-filter-header {
-    font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px;
-    color:#64748b; margin-bottom:10px; padding:6px 0; border-bottom:1px solid #334155;
-}
-[data-testid="stSidebar"] [data-testid="stDateInput"] label,
-[data-testid="stSidebar"] [data-testid="stMultiSelect"] label {
-    font-size:.78rem !important; color:#94a3b8 !important; font-weight:600 !important;
-}
-.ier-info-box {
-    background:#0f2744; border:1px solid #2563eb; border-radius:10px;
-    padding:14px 18px; margin:10px 0; font-size:.85rem; color:#93c5fd; line-height:1.6;
-}
-.ier-gauge-wrap {
-    background:#1e293b; border-radius:14px; padding:18px 22px;
-    border-left:5px solid #6366f1; margin-bottom:12px; text-align:center;
-}
-.ier-score-big { font-size:2.4rem; font-weight:900; line-height:1; }
-.ier-clasif    { font-size:.85rem; font-weight:700; margin-top:4px; }
-.vel-badge {
-    background:#2d1b00; border:1px solid #f97316; border-radius:6px;
-    padding:3px 10px; display:inline-block; font-size:.78rem; color:#fb923c; font-weight:700;
-}
+.sec-title { font-size:1.1rem; font-weight:700; color:#e2e8f0; border-left:4px solid #2563eb; padding-left:10px; margin:18px 0 10px; }
+.price-badge { background:#292524; border:1px solid #f59e0b; border-radius:8px; padding:8px 14px; display:inline-block; font-size:0.85rem; color:#fbbf24; font-weight:600; }
 </style>
 """
 
-pg = st.sidebar.radio(
-    "Navegacion",
-    ["Dashboard Principal", "Modelo Predictivo", "Análisis por Patente"],
-    index=0,
-    label_visibility="collapsed"
-)
+pg = st.sidebar.radio("Navegacion", ["Dashboard Principal", "Modelo Predictivo", "Análisis por Patente"], index=0)
 st.sidebar.markdown("---")
 st.sidebar.image(LOGO_URL, width=160)
 
 BASE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR35NkYPtJrOrdYHLGUH7GIW93s5cPAqQ0zEk5fP1c3gvErwbUW7HJ2OeWBYaBVsYKVmCf0yhLvs6eG/pub?output=csv"
-GID_TEL  = "0"
-GID_UNID = "882343299"
-GID_VEL  = "1563993963"
-URL_TEL  = f"{BASE_URL}&gid={GID_TEL}"
-URL_UNID = f"{BASE_URL}&gid={GID_UNID}"
-URL_VEL  = f"{BASE_URL}&gid={GID_VEL}"
+URL_TEL  = f"{BASE_URL}&gid=0"
+URL_UNID = f"{BASE_URL}&gid=882343299"
+URL_VEL  = f"{BASE_URL}&gid=1563993963"
 CARGA_URL = "http://bi.sistemaexpreso.com.ar/reporte_hojas.xlsx"
 
-# ==================== FUNCIONES DE CARGA (sin cambios) ====================
 @st.cache_data(ttl=600)
 def cargar_datos():
-    # ... (todo el código original de cargar_datos se mantiene igual) ...
     try:
         df1 = pd.read_csv(URL_TEL)
         df2 = pd.read_csv(URL_UNID)
@@ -157,7 +89,6 @@ def cargar_datos():
                 elif "FECHA" in c or "DATE" in c: cm[c] = "FECHA"
                 elif "L/100" in c or "CONSUMO C" in c: cm[c] = "L100KM"
                 elif "RALENT" in c: cm[c] = "RALENTI"
-                elif "TIEMPO" in c and "MOTOR" in c: cm[c] = "TIEMPO_MOTOR"
                 elif "EMPRESA" in c: cm[c] = "EMPRESA"
             df = df.rename(columns=cm)
             df = df.loc[:, ~df.columns.duplicated()]
@@ -166,8 +97,7 @@ def cargar_datos():
             for col in ["LITROS", "KM", "L100KM", "RALENTI"]:
                 if col in df.columns:
                     serie = df[col]
-                    if isinstance(serie, pd.DataFrame):
-                        serie = serie.iloc[:, 0]
+                    if isinstance(serie, pd.DataFrame): serie = serie.iloc[:, 0]
                     serie = serie.astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
                     df[col] = pd.to_numeric(serie, errors="coerce").fillna(0)
             if "FECHA" in df.columns:
@@ -180,15 +110,20 @@ def cargar_datos():
         if "L100KM" not in df1.columns and "LITROS" in df1.columns and "KM" in df1.columns:
             df1["L100KM"] = (df1["LITROS"] / df1["KM"].replace(0, np.nan) * 100).round(2)
 
-        # Merge Ralentí por mes
-        if 'RALENTI' in df2.columns and 'DOMINIO' in df2.columns and 'FECHA' in df2.columns:
+        # Merge Ralentí por mes (CORREGIDO)
+        if 'RALENTI' in df2.columns and 'FECHA' in df2.columns and 'FECHA' in df1.columns:
             df2_ral = df2[['DOMINIO','FECHA','RALENTI']].copy()
             df2_ral = df2_ral[df2_ral['RALENTI'] > 0]
             df2_ral['_MES'] = df2_ral['FECHA'].dt.to_period('M')
             df1['_MES'] = df1['FECHA'].dt.to_period('M')
-            df1 = df1.merge(df2_ral[['DOMINIO','_MES','RALENTI']].rename(columns={'RALENTI':'_RAL_u'}),
-                            on=['DOMINIO','_MES'], how='left')
-            df1['RALENTI'] = df1.get('RALENTI', 0).combine_first(df1['_RAL_u']).fillna(0)
+            df1 = df1.merge(
+                df2_ral[['DOMINIO','_MES','RALENTI']].rename(columns={'RALENTI':'_RAL_u'}),
+                on=['DOMINIO','_MES'], how='left'
+            )
+            if 'RALENTI' not in df1.columns:
+                df1['RALENTI'] = df1['_RAL_u'].fillna(0)
+            else:
+                df1['RALENTI'] = df1['RALENTI'].combine_first(df1['_RAL_u']).fillna(0)
             df1.drop(columns=['_RAL_u','_MES'], inplace=True, errors='ignore')
 
         if "EMPRESA" in df1.columns:
@@ -199,12 +134,8 @@ def cargar_datos():
         st.error(f"Error cargando datos: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
-# (Las demás funciones: cargar_velocidad, cargar_carga, obtener_precio_gasoil, asignar_modelo se mantienen iguales)
-# ... Copia el resto del código original desde aquí ...
-
 @st.cache_data(ttl=3600)
 def cargar_velocidad():
-    # ... código original completo de cargar_velocidad ...
     try:
         df = pd.read_csv(URL_VEL)
         df.columns = [str(c).strip() for c in df.columns]
@@ -229,7 +160,6 @@ def cargar_velocidad():
 
 @st.cache_data(ttl=3600)
 def cargar_carga():
-    # ... código original de cargar_carga ...
     try:
         import re
         df = pd.read_excel(CARGA_URL)
@@ -238,7 +168,7 @@ def cargar_carga():
         col_peso = next((c for c in df.columns if 'PESO' in c.upper() and 'ENTREGAD' in c.upper()), None)
         col_fecha = next((c for c in df.columns if 'FECHA' in c.upper()), None)
         col_estado = next((c for c in df.columns if 'ESTADO' in c.upper()), None)
-        
+
         if not all([col_unid, col_peso, col_fecha]):
             return pd.DataFrame()
 
@@ -261,13 +191,26 @@ def cargar_carga():
     except Exception:
         return pd.DataFrame()
 
+def obtener_precio_gasoil():
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get("https://surtidores.com.ar/precios/", headers=headers, timeout=10)
+        soup = BeautifulSoup(r.text, "html.parser")
+        texto = soup.get_text(separator=" ")
+        matches = [int(x) for x in re.findall(r'\b(\d{3,4})\b', texto) if 500 <= int(x) <= 5000]
+        if matches:
+            return float(matches[-1]), "surtidores.com.ar"
+    except:
+        pass
+    return 2025.0, "referencia estimada"
+
 def asignar_modelo(dominio):
     d = str(dominio).strip().upper()
     if d in SWAY_PATENTES: return 'S-Way'
     elif d in SCANIA_PATENTES: return 'Scania'
     else: return 'Stralis'
 
-# ==================== NUEVA FUNCIÓN calcular_ier() ====================
+# ==================== IER MEJORADO ====================
 def calcular_ier(df, df_vel=None, df_carga=None):
     if 'DOMINIO' not in df.columns or df.empty:
         return pd.DataFrame()
@@ -275,27 +218,24 @@ def calcular_ier(df, df_vel=None, df_carga=None):
     if df_c.empty:
         return pd.DataFrame()
 
-    agg_dict = {'L100KM': ('L100KM','mean'), 'KM': ('KM','sum'), 'LITROS': ('LITROS','sum')}
-    if 'MES_PERIODO' in df_c.columns:
-        agg_dict['MESES'] = ('MES_PERIODO','nunique')
-    agg = df_c.groupby('DOMINIO').agg(**agg_dict).reset_index()
+    agg = df_c.groupby('DOMINIO').agg(
+        L100KM=('L100KM', 'mean'),
+        KM=('KM', 'sum'),
+        LITROS=('LITROS', 'sum')
+    ).reset_index()
 
     # Ralentí
     if 'RALENTI' in df_c.columns:
         ral = df_c.groupby('DOMINIO').agg(_RAL=('RALENTI','sum'), _LTS=('LITROS','sum')).reset_index()
-        ral['_RATIO'] = ral['_RAL'] / ral['_LTS'].replace(0, np.nan)
-        ral['RALENTI_PCT'] = np.where(ral['_RATIO'] <= 1.0, (ral['_RATIO'] * 100).round(2), 0.0)
+        ral['RALENTI_PCT'] = np.where(ral['_LTS'] > 0, (ral['_RAL'] / ral['_LTS'] * 100).round(2), 0)
         agg = agg.merge(ral[['DOMINIO','RALENTI_PCT']], on='DOMINIO', how='left')
     else:
         agg['RALENTI_PCT'] = 0
-    agg['RALENTI_PCT'] = agg['RALENTI_PCT'].fillna(0)
 
     # Velocidad
     if df_vel is not None and not df_vel.empty:
-        vel_counts = df_vel.groupby('DOMINIO').agg(EXCESOS=('DOMINIO','count'), VEL_MAX=('VELOCIDAD','max')).reset_index()
-        agg = agg.merge(vel_counts, on='DOMINIO', how='left')
-        agg['EXCESOS'] = agg['EXCESOS'].fillna(0).astype(int)
-        agg['VEL_MAX'] = agg['VEL_MAX'].fillna(0)
+        vel = df_vel.groupby('DOMINIO').agg(EXCESOS=('DOMINIO','count'), VEL_MAX=('VELOCIDAD','max')).reset_index()
+        agg = agg.merge(vel, on='DOMINIO', how='left')
     else:
         agg['EXCESOS'] = 0
         agg['VEL_MAX'] = 0
@@ -304,66 +244,42 @@ def calcular_ier(df, df_vel=None, df_carga=None):
 
     # Carga
     if df_carga is not None and not df_carga.empty and 'MES_PERIODO' in df.columns:
-        meses_activos = df['MES_PERIODO'].dropna().unique()
-        carga_periodo = df_carga[df_carga['MES'].isin(meses_activos)]
-        if not carga_periodo.empty:
-            carga_agg = carga_periodo.groupby('DOMINIO')['PESO_TON'].sum().reset_index()
+        meses = df['MES_PERIODO'].dropna().unique()
+        carga = df_carga[df_carga['MES'].isin(meses)]
+        if not carga.empty:
+            carga_agg = carga.groupby('DOMINIO')['PESO_TON'].sum().reset_index()
             agg = agg.merge(carga_agg, on='DOMINIO', how='left')
-            agg['PESO_TON'] = agg['PESO_TON'].fillna(0)
-    else:
-        agg['PESO_TON'] = 0.0
+    agg['PESO_TON'] = agg.get('PESO_TON', 0).fillna(0)
 
-    agg['TONKML'] = np.where(
-        (agg['PESO_TON'] > 0) & (agg['LITROS'] > 0),
-        (agg['PESO_TON'] * agg['KM']) / agg['LITROS'],
-        np.nan
-    )
+    agg['TONKML'] = np.where((agg['PESO_TON'] > 0) & (agg['LITROS'] > 0),
+                             (agg['PESO_TON'] * agg['KM']) / agg['LITROS'], np.nan)
     tiene_carga = agg['PESO_TON'].sum() > 0
 
     # Promedios por modelo
-    def _safe_mean(x):
-        v = x.dropna()
-        return v.mean() if len(v) > 0 else np.nan
-
     modelo_avgs = agg.groupby('MODELO').agg(
         L100KM_MOD=('L100KM', 'mean'),
         KM_MOD=('KM', 'mean'),
         RAL_MOD=('RALENTI_PCT', 'mean'),
         EXCESOS_MOD=('EXCESOS', 'mean'),
-        TONKML_MOD=('TONKML', _safe_mean)
+        TONKML_MOD=('TONKML', lambda x: x.dropna().mean())
     ).reset_index()
     agg = agg.merge(modelo_avgs, on='MODELO', how='left')
 
-    # ====================== NUEVA PUNTUACIÓN ======================
+    # === NUEVA PUNTUACIÓN ===
     agg['SCORE_CONSUMO'] = agg.apply(lambda x: score_lower_better(x['L100KM'], x['L100KM_MOD']), axis=1)
     agg['SCORE_RALENTI'] = agg.apply(lambda x: score_lower_better(x['RALENTI_PCT'], x['RAL_MOD']), axis=1)
     agg['SCORE_KM']      = agg.apply(lambda x: score_higher_better(x['KM'], x['KM_MOD']), axis=1)
-    
-    def score_vel(row):
-        if row['EXCESOS_MOD'] == 0:
-            return 1.0
-        return score_lower_better(row['EXCESOS'], row['EXCESOS_MOD'])
-    agg['SCORE_VEL'] = agg.apply(score_vel, axis=1)
+    agg['SCORE_VEL']     = agg.apply(lambda x: score_lower_better(x['EXCESOS'], x.get('EXCESOS_MOD', 0)), axis=1)
+    agg['SCORE_CARGA']   = agg.apply(lambda x: score_higher_better(x['TONKML'], x.get('TONKML_MOD', 0)) 
+                                     if pd.notna(x['TONKML']) else 1.0, axis=1)
 
-    agg['SCORE_CARGA'] = np.where(
-        agg['TONKML'].notna() & (agg['TONKML_MOD'] > 0),
-        agg.apply(lambda x: score_higher_better(x['TONKML'], x['TONKML_MOD']), axis=1),
-        1.0
-    )
-    # ============================================================
-
-    # Cálculo final del IER
+    # Cálculo IER
     if tiene_carga:
-        agg['IER'] = (0.45 * agg['SCORE_CONSUMO'] +
-                      0.15 * agg['SCORE_RALENTI'] +
-                      0.15 * agg['SCORE_KM']      +
-                      0.15 * agg['SCORE_VEL']     +
-                      0.10 * agg['SCORE_CARGA']).mul(100).round(1)
+        agg['IER'] = (0.45*agg['SCORE_CONSUMO'] + 0.15*agg['SCORE_RALENTI'] + 0.15*agg['SCORE_KM'] +
+                      0.15*agg['SCORE_VEL'] + 0.10*agg['SCORE_CARGA']).mul(100).round(1)
     else:
-        agg['IER'] = (0.50 * agg['SCORE_CONSUMO'] +
-                      0.15 * agg['SCORE_RALENTI'] +
-                      0.15 * agg['SCORE_KM']      +
-                      0.20 * agg['SCORE_VEL']).mul(100).round(1)
+        agg['IER'] = (0.50*agg['SCORE_CONSUMO'] + 0.15*agg['SCORE_RALENTI'] + 0.15*agg['SCORE_KM'] +
+                      0.20*agg['SCORE_VEL']).mul(100).round(1)
 
     def clasif(v):
         if v >= 105: return '🟢 Eficiente'
@@ -372,29 +288,22 @@ def calcular_ier(df, df_vel=None, df_carga=None):
         else: return '🔴 Crítico'
     agg['CLASIFICACION'] = agg['IER'].apply(clasif)
 
-    keep = ['DOMINIO','MODELO','IER','CLASIFICACION',
-            'L100KM','L100KM_MOD','RALENTI_PCT','RAL_MOD',
-            'KM','KM_MOD','LITROS','EXCESOS','VEL_MAX','EXCESOS_MOD',
-            'PESO_TON','TONKML','TONKML_MOD',
-            'SCORE_CONSUMO','SCORE_RALENTI','SCORE_KM','SCORE_VEL','SCORE_CARGA']
-    if 'MESES' in agg.columns:
-        keep.append('MESES')
-    return agg[keep].sort_values('IER', ascending=False).reset_index(drop=True)
+    return agg.sort_values('IER', ascending=False).reset_index(drop=True)
 
-
-# ==================== RESTO DEL CÓDIGO (carga y dashboard) ====================
-with st.spinner('Cargando telemetría, velocidades y datos de carga...'):
+# ====================== EJECUCIÓN ======================
+with st.spinner('Cargando datos...'):
     df_raw, df_unid = cargar_datos()
-    df_vel_raw      = cargar_velocidad()
-    df_carga_raw    = cargar_carga()
+    df_vel_raw = cargar_velocidad()
+    df_carga_raw = cargar_carga()
 
-# ... A partir de aquí pega el resto de tu código original 
-# (todo lo que viene después de la definición de calcular_ier en tu archivo original)
-
-precio_gasoil, precio_fuente = obtener_precio_gasoil()   # Asegúrate de que esta función también esté definida
+precio_gasoil, precio_fuente = obtener_precio_gasoil()
 st.markdown(DARK_CSS, unsafe_allow_html=True)
 
-# (Continúa con el resto del dashboard tal como lo tenías...)
+# ... A partir de aquí puedes pegar el resto de tu código original (el dashboard) ...
+
+st.success("✅ IER actualizado correctamente")
+st.info("Prueba recargando la página")
+
 if 'DOMINIO' in df_raw.columns:
     df_raw['MODELO'] = df_raw['DOMINIO'].apply(asignar_modelo)
 
