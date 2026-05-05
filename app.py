@@ -381,25 +381,11 @@ def calcular_ier(df, df_vel=None):
         return min(row['EXCESOS_MOD'] / row['EXCESOS'], 2.50)
     agg['SCORE_VEL'] = agg.apply(score_vel, axis=1).clip(0.40, 2.50)
 
-    # ── Ponderación dinámica ─────────────────────────────────────────────────
-    # Si la unidad no reporta ralentí (RALENTI_PCT == 0), el 15% se redistribuye
-    # proporcionalmente entre los otros 3 componentes (50/85, 15/85, 20/85).
-    agg['TIENE_RALENTI'] = agg['RALENTI_PCT'] > 0
-
-    def calc_ier_row(row):
-        if row['TIENE_RALENTI']:
-            # Con ralentí: 50 / 15 / 15 / 20
-            return (0.5000 * row['SCORE_CONSUMO'] +
-                    0.1500 * row['SCORE_RALENTI'] +
-                    0.1500 * row['SCORE_KM']      +
-                    0.2000 * row['SCORE_VEL']) * 100
-        else:
-            # Sin ralentí: 58.8 / 17.6 / 23.5  (redistribuido proporcional)
-            return (0.5882 * row['SCORE_CONSUMO'] +
-                    0.1765 * row['SCORE_KM']      +
-                    0.2353 * row['SCORE_VEL']) * 100
-
-    agg['IER'] = agg.apply(calc_ier_row, axis=1).round(1)
+    # ── Ponderación IER: 50% consumo / 15% ralentí / 15% km / 20% velocidad ──
+    agg['IER'] = (0.50 * agg['SCORE_CONSUMO'] +
+                  0.15 * agg['SCORE_RALENTI'] +
+                  0.15 * agg['SCORE_KM']      +
+                  0.20 * agg['SCORE_VEL']).mul(100).round(1)
 
     def clasif(v):
         if   v >= 105: return '🟢 Eficiente'
@@ -411,8 +397,7 @@ def calcular_ier(df, df_vel=None):
     keep = ['DOMINIO','MODELO','IER','CLASIFICACION',
             'L100KM','L100KM_MOD','RALENTI_PCT','RAL_MOD',
             'KM','KM_MOD','LITROS','EXCESOS','VEL_MAX','EXCESOS_MOD',
-            'SCORE_CONSUMO','SCORE_RALENTI','SCORE_KM','SCORE_VEL',
-            'TIENE_RALENTI']
+            'SCORE_CONSUMO','SCORE_RALENTI','SCORE_KM','SCORE_VEL']
     if 'MESES' in agg.columns:
         keep.append('MESES')
     return agg[keep].sort_values('IER', ascending=False).reset_index(drop=True)
@@ -749,12 +734,11 @@ if pg == "Dashboard Principal":
         with st.expander('📋 Ver tabla detallada IER (todos los componentes)'):
             show_cols = ['DOMINIO','MODELO','IER','CLASIFICACION',
                          'L100KM','L100KM_MOD','RALENTI_PCT','RAL_MOD',
-                         'EXCESOS','EXCESOS_MOD','VEL_MAX','KM','TIENE_RALENTI']
+                         'EXCESOS','EXCESOS_MOD','VEL_MAX','KM']
             ier_show = df_ier[show_cols].copy()
-            ier_show['TIENE_RALENTI'] = ier_show['TIENE_RALENTI'].map({True: '✅ Sí', False: '⚠️ No (redistribuida)'})
             ier_show.columns = ['Patente','Modelo','IER','Clasificación',
                                   'L/100km','Prom L/100km','% Ralentí','% Ral Prom',
-                                  f'Excesos >{LIMITE_VELOCIDAD}km/h','Prom Excesos Modelo','Vel. Máx (km/h)','KM','Pond. Ralentí']
+                                  f'Excesos >{LIMITE_VELOCIDAD}km/h','Prom Excesos Modelo','Vel. Máx (km/h)','KM']
             ier_show['IER']               = ier_show['IER'].round(1)
             ier_show['L/100km']           = ier_show['L/100km'].round(2)
             ier_show['Prom L/100km']      = ier_show['Prom L/100km'].round(2)
