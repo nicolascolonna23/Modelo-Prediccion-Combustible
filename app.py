@@ -301,15 +301,11 @@ def asignar_modelo(dominio):
 def calcular_ier(df, df_vel=None):
     """
     Compara cada unidad contra el promedio de SU PROPIO MODELO.
-    Ponderación v3 (con dato de ralentí):
+    Ponderación:
         50 % → Consumo L/100 km   (menor = mejor)
         15 % → % Ralentí           (menor = mejor)
         15 % → Utilización km      (mayor = mejor)
         20 % → Excesos vel. >88    (menor = mejor — también impacta seguridad)
-    Ponderación v3b (sin dato de ralentí — redistribuida proporcionalmente):
-        58.8 % → Consumo L/100 km
-        17.6 % → Utilización km
-        23.5 % → Excesos vel. >88
     IER = 100 → igual al promedio · >100 → mejor · <100 → peor
     """
     if 'DOMINIO' not in df.columns or df.empty:
@@ -655,12 +651,9 @@ if pg == "Dashboard Principal":
     <div class="ier-info-box">
     <b>¿Qué es el IER?</b> Métrica <b>equitativa</b>: cada camión se compara contra el promedio de
     <b>su propio modelo</b> — Stralis vs Stralis, S‑Way vs S‑Way, Scania vs Scania.<br>
-    <b>Ponderación con ralentí:</b>&nbsp;
+    <b>Ponderación:</b>&nbsp;
     <b>50 %</b> Consumo &nbsp;·&nbsp; <b>15 %</b> Ralentí &nbsp;·&nbsp; <b>15 %</b> KM &nbsp;·&nbsp;
     <b>20 %</b> Vel. &gt;{LIMITE_VELOCIDAD} km/h {'✅' if tiene_vel else '⚠️'}<br>
-    <b>Ponderación sin ralentí</b> <i>(S‑Way — no reportan ese dato)</i><b>:</b>&nbsp;
-    <b>58.8 %</b> Consumo &nbsp;·&nbsp; <b>17.6 %</b> KM &nbsp;·&nbsp; <b>23.5 %</b> Vel. &gt;{LIMITE_VELOCIDAD} km/h
-    &nbsp;— el 15% de ralentí se redistribuye proporcionalmente.<br>
     <b>Escala:</b>&nbsp;
     🟢 Eficiente ≥ 105 &nbsp;·&nbsp; 🟡 Normal 95–105 &nbsp;·&nbsp;
     🟠 Atención 85–95 &nbsp;·&nbsp; 🔴 Crítico &lt; 85
