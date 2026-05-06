@@ -139,7 +139,7 @@ section[data-testid="stMain"] { background: #0f172a; }
 # ── Navegación sidebar ─────────────────────────────────────────────────────────
 pg = st.sidebar.radio(
     "Navegacion",
-    ["Dashboard Principal", "Modelo Predictivo", "Análisis por Patente"],
+    ["Dashboard Principal", "Modelo Predictivo", "Análisis por Patente", "Datos Operativos"],
     index=0,
     label_visibility="collapsed"
 )
@@ -600,20 +600,23 @@ def calcular_ier(df, df_vel=None, df_carga=None):
             # else: neutral (ya 1.0)
 
     # ── 4. IER ponderado ─────────────────────────────────────────────────────
+    # Con carga: L/100km 35% · ralentí 15% · km 15% · velocidad 15% · ton·km/L 20%
+    # Sin carga: pesos anteriores redistribuidos proporcionalmente (÷0.80):
+    #            L/100km 43.75% · ralentí 18.75% · km 18.75% · velocidad 18.75%
     if tiene_carga:
         agg['IER'] = (
-            0.45 * agg['SCORE_CONSUMO'] +
+            0.35 * agg['SCORE_CONSUMO'] +
             0.15 * agg['SCORE_RALENTI'] +
             0.15 * agg['SCORE_KM']      +
             0.15 * agg['SCORE_VEL']     +
-            0.10 * agg['SCORE_CARGA']
+            0.20 * agg['SCORE_CARGA']
         ).mul(100).round(1)
     else:
         agg['IER'] = (
-            0.50 * agg['SCORE_CONSUMO'] +
-            0.15 * agg['SCORE_RALENTI'] +
-            0.15 * agg['SCORE_KM']      +
-            0.20 * agg['SCORE_VEL']
+            0.4375 * agg['SCORE_CONSUMO'] +
+            0.1875 * agg['SCORE_RALENTI'] +
+            0.1875 * agg['SCORE_KM']      +
+            0.1875 * agg['SCORE_VEL']
         ).mul(100).round(1)
 
     agg['IER'] = agg['IER'].fillna(100.0)
@@ -906,12 +909,12 @@ if pg == "Dashboard Principal":
                        and df_ier['PESO_TON'].sum() > 0)
 
     if tiene_carga_ier:
-        pond_txt = (f"<b>45%</b> Consumo &nbsp;·&nbsp; <b>15%</b> Ralentí &nbsp;·&nbsp; "
+        pond_txt = (f"<b>35%</b> Consumo &nbsp;·&nbsp; <b>15%</b> Ralentí &nbsp;·&nbsp; "
                     f"<b>15%</b> KM &nbsp;·&nbsp; <b>15%</b> Vel.&gt;{LIMITE_VELOCIDAD}km/h "
-                    f"{'✅' if tiene_vel else '⚠️'} &nbsp;·&nbsp; <b>10%</b> ton·km/L 📦")
+                    f"{'✅' if tiene_vel else '⚠️'} &nbsp;·&nbsp; <b>20%</b> ton·km/L 📦")
     else:
-        pond_txt = (f"<b>50%</b> Consumo &nbsp;·&nbsp; <b>15%</b> Ralentí &nbsp;·&nbsp; "
-                    f"<b>15%</b> KM &nbsp;·&nbsp; <b>20%</b> Vel.&gt;{LIMITE_VELOCIDAD}km/h "
+        pond_txt = (f"<b>43.75%</b> Consumo &nbsp;·&nbsp; <b>18.75%</b> Ralentí &nbsp;·&nbsp; "
+                    f"<b>18.75%</b> KM &nbsp;·&nbsp; <b>18.75%</b> Vel.&gt;{LIMITE_VELOCIDAD}km/h "
                     f"{'✅' if tiene_vel else '⚠️'} &nbsp;·&nbsp; <i>sin datos de carga</i>")
 
     st.markdown(f"""
@@ -1318,7 +1321,7 @@ elif pg == "Modelo Predictivo":
 # ═══════════════════════════════════════════════════════════════════════════════
 #  PESTAÑA 3 — ANÁLISIS POR PATENTE
 # ═══════════════════════════════════════════════════════════════════════════════
-else:
+elif pg == "Análisis por Patente":
     col_logo3, col_title3 = st.columns([1, 5])
     with col_logo3:
         st.image(LOGO_URL, width=130)
@@ -1524,16 +1527,16 @@ else:
                         return np.arctanh(t) / k
 
                     if _tiene_c:
-                        comp_bar('⛽ Consumo',          ier_row['SCORE_CONSUMO'], 45, inv_zscore(ier_row['SCORE_CONSUMO']))
+                        comp_bar('⛽ Consumo',          ier_row['SCORE_CONSUMO'], 35, inv_zscore(ier_row['SCORE_CONSUMO']))
                         comp_bar('⏱️ Ralentí',           ier_row['SCORE_RALENTI'], 15, inv_zscore(ier_row['SCORE_RALENTI']))
                         comp_bar('🛣️ Utilización KM',   ier_row['SCORE_KM'],      15, inv_zscore(ier_row['SCORE_KM']))
                         comp_bar(f'🚨 Vel.>{LIMITE_VELOCIDAD}km/h', ier_row['SCORE_VEL'], 15, inv_zscore(ier_row['SCORE_VEL']))
-                        comp_bar('📦 ton·km/L',          ier_row['SCORE_CARGA'],   10, inv_zscore(ier_row['SCORE_CARGA']))
+                        comp_bar('📦 ton·km/L',          ier_row['SCORE_CARGA'],   20, inv_zscore(ier_row['SCORE_CARGA']))
                     else:
-                        comp_bar('⛽ Consumo',          ier_row['SCORE_CONSUMO'], 50, inv_zscore(ier_row['SCORE_CONSUMO']))
-                        comp_bar('⏱️ Ralentí',           ier_row['SCORE_RALENTI'], 15, inv_zscore(ier_row['SCORE_RALENTI']))
-                        comp_bar('🛣️ Utilización KM',   ier_row['SCORE_KM'],      15, inv_zscore(ier_row['SCORE_KM']))
-                        comp_bar(f'🚨 Vel.>{LIMITE_VELOCIDAD}km/h', ier_row['SCORE_VEL'], 20, inv_zscore(ier_row['SCORE_VEL']))
+                        comp_bar('⛽ Consumo',          ier_row['SCORE_CONSUMO'], 44, inv_zscore(ier_row['SCORE_CONSUMO']))
+                        comp_bar('⏱️ Ralentí',           ier_row['SCORE_RALENTI'], 19, inv_zscore(ier_row['SCORE_RALENTI']))
+                        comp_bar('🛣️ Utilización KM',   ier_row['SCORE_KM'],      19, inv_zscore(ier_row['SCORE_KM']))
+                        comp_bar(f'🚨 Vel.>{LIMITE_VELOCIDAD}km/h', ier_row['SCORE_VEL'], 18, inv_zscore(ier_row['SCORE_VEL']))
 
                 with ia3:
                     st.markdown(
@@ -1656,3 +1659,313 @@ else:
     resumen_show['Litros/Mes Prom'] = resumen_show['Litros/Mes Prom'].apply(lambda x: f'{x:,.0f}')
     st.dataframe(resumen_show, use_container_width=True, hide_index=True)
     st.caption(f'Datos {anio_sel} · Google Sheets Expreso Diemar · Actualización cada 10 min')
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PESTAÑA 4 — DATOS OPERATIVOS
+# ═══════════════════════════════════════════════════════════════════════════════
+elif pg == "Datos Operativos":
+    col_logo4, col_title4 = st.columns([1, 5])
+    with col_logo4:
+        st.image(LOGO_URL, width=130)
+    with col_title4:
+        st.markdown(f"""
+        <div style='padding:8px 0;'>
+            <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>Datos Operativos — {anio_sel}</div>
+            <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>
+                Peso entregado por patente &middot; Ton·km/L &middot; Productividad de carga
+            </div>
+        </div>""", unsafe_allow_html=True)
+
+    if df_carga_raw is None or df_carga_raw.empty:
+        st.warning('⚠️ No hay datos de carga disponibles. Verificá la conexión al sistema BI (reporte_hojas.xlsx).')
+        st.stop()
+
+    # ── Filtrar datos de carga al año seleccionado ────────────────────────────
+    df_carga_anio = df_carga_raw[
+        df_carga_raw['MES'].apply(lambda p: p.year) == anio_sel
+    ].copy() if not df_carga_raw.empty else pd.DataFrame()
+
+    if df_carga_anio.empty:
+        st.warning(f'Sin datos de carga para {anio_sel}.')
+        st.stop()
+
+    df_carga_anio['MES_STR'] = df_carga_anio['MES'].astype(str)
+    df_carga_anio['MODELO']  = df_carga_anio['DOMINIO'].apply(asignar_modelo)
+
+    # ── KPIs globales de carga ────────────────────────────────────────────────
+    st.markdown(f'<div class="sec-title">Resumen de Carga — {anio_sel}</div>', unsafe_allow_html=True)
+
+    peso_total       = df_carga_anio['PESO_TON'].sum()
+    n_pat_con_carga  = df_carga_anio['DOMINIO'].nunique()
+    peso_prom_pat    = peso_total / n_pat_con_carga if n_pat_con_carga > 0 else 0
+    meses_con_carga  = df_carga_anio['MES'].nunique()
+
+    ck1, ck2, ck3, ck4 = st.columns(4)
+    def kpi(cont, color, label, value, sub=''):
+        cont.markdown(
+            f'<div class="kpi-card {color}">'
+            f'<div class="kpi-label">{label}</div>'
+            f'<div class="kpi-value">{value}</div>'
+            f'<div class="kpi-sub">{sub}</div>'
+            f'</div>', unsafe_allow_html=True)
+    kpi(ck1, 'kpi-purple', '📦 Peso Total Entregado', f'{peso_total:,.1f}',  f'toneladas {anio_sel}')
+    kpi(ck2, '',           '🚛 Patentes con Carga',   f'{n_pat_con_carga}',   f'de {df["DOMINIO"].nunique()} activas')
+    kpi(ck3, 'kpi-green',  '📊 Prom. por Patente',   f'{peso_prom_pat:,.1f}', 'toneladas anuales')
+    kpi(ck4, 'kpi-amber',  '📅 Meses con datos',      f'{meses_con_carga}',   f'de {anio_sel}')
+
+    st.divider()
+
+    # ── Sección 1: Peso entregado por mes y por patente ───────────────────────
+    st.markdown(f'<div class="sec-title">📦 Peso Entregado por Mes y Patente (toneladas) — {anio_sel}</div>',
+                unsafe_allow_html=True)
+
+    # Pivot: filas = DOMINIO, columnas = MES
+    pivot_carga = (df_carga_anio
+                   .pivot_table(index='DOMINIO', columns='MES_STR', values='PESO_TON',
+                                aggfunc='sum', fill_value=0)
+                   .reset_index())
+
+    # Total por patente (fila extra)
+    pivot_carga['TOTAL'] = pivot_carga.drop(columns='DOMINIO').sum(axis=1)
+    pivot_carga = pivot_carga.sort_values('TOTAL', ascending=False)
+    meses_cols = [c for c in pivot_carga.columns if c not in ['DOMINIO','TOTAL']]
+
+    # Heatmap de peso por mes × patente
+    if meses_cols:
+        z_vals   = pivot_carga[meses_cols].values.tolist()
+        y_vals   = pivot_carga['DOMINIO'].tolist()
+        txt_vals = [[f'{v:,.1f}' if v > 0 else '' for v in row] for row in z_vals]
+
+        fig_heat_c = go.Figure(go.Heatmap(
+            z=z_vals, x=meses_cols, y=y_vals,
+            text=txt_vals, texttemplate='%{text}',
+            colorscale=[[0.0,'#1e293b'],[0.3,'#1d4ed8'],[0.65,'#7c3aed'],[1.0,'#be185d']],
+            colorbar=dict(title=dict(text='Ton', font=dict(color='#94a3b8')),
+                          tickfont=dict(color='#94a3b8'), bgcolor='rgba(0,0,0,0)'),
+            hovertemplate='Patente: <b>%{y}</b><br>Mes: %{x}<br>Peso: <b>%{z:,.1f} ton</b><extra></extra>'
+        ))
+        fig_heat_c.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(30,41,59,0.6)',
+            font=dict(color='#e2e8f0'),
+            xaxis=dict(tickfont=dict(color='#94a3b8', size=10), tickangle=-45, side='bottom'),
+            yaxis=dict(tickfont=dict(color='#94a3b8', size=10)),
+            height=max(300, len(y_vals) * 40),
+            margin=dict(l=10, r=10, t=20, b=60))
+        st.plotly_chart(fig_heat_c, use_container_width=True)
+        st.caption('Celdas vacías = sin viajes ese mes · Color más intenso = mayor tonelaje')
+
+    # Tabla detalle con totales
+    with st.expander('📋 Ver tabla completa de peso entregado (ton)'):
+        pivot_show = pivot_carga.copy()
+        for c in meses_cols + ['TOTAL']:
+            pivot_show[c] = pivot_show[c].apply(lambda x: f'{x:,.1f}' if x > 0 else '—')
+        pivot_show = pivot_show.rename(columns={'DOMINIO': 'Patente', 'TOTAL': 'TOTAL año'})
+        st.dataframe(pivot_show, use_container_width=True, hide_index=True)
+
+    # Gráfico de barras apiladas: peso por mes
+    st.markdown(f'<div class="sec-title">Evolución Mensual de Peso Entregado por Patente — {anio_sel}</div>',
+                unsafe_allow_html=True)
+
+    COLORES_PAT = ['#3b82f6','#f97316','#22c55e','#a855f7','#f43f5e','#06b6d4','#eab308','#84cc16']
+    fig_bar_c = go.Figure()
+    for i, (_, row) in enumerate(pivot_carga.iterrows()):
+        dom = row['DOMINIO']
+        vals = [row.get(m, 0) for m in meses_cols]
+        fig_bar_c.add_trace(go.Bar(
+            name=dom, x=meses_cols, y=vals,
+            marker_color=COLORES_PAT[i % len(COLORES_PAT)],
+            hovertemplate=f'<b>{dom}</b><br>%{{x}}: <b>%{{y:,.1f}} ton</b><extra></extra>'
+        ))
+    fig_bar_c.update_layout(
+        barmode='stack',
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(30,41,59,0.6)',
+        font=dict(color='#e2e8f0'),
+        xaxis=dict(gridcolor='#1e293b', tickfont=dict(color='#94a3b8', size=10), tickangle=-45),
+        yaxis=dict(gridcolor='#1e293b', tickfont=dict(color='#94a3b8'),
+                   title=dict(text='Toneladas entregadas', font=dict(color='#64748b'))),
+        legend=dict(bgcolor='rgba(15,23,42,0.8)', bordercolor='#334155', borderwidth=1,
+                    orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+        height=420, margin=dict(l=10, r=10, t=50, b=70))
+    st.plotly_chart(fig_bar_c, use_container_width=True)
+
+    st.divider()
+
+    # ── Sección 2: Detalle ton·km/L ───────────────────────────────────────────
+    st.markdown(f'<div class="sec-title">📐 Detalle ton·km/L (Productividad de Carga) — {anio_sel}</div>',
+                unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="ier-info-box">
+    <b>¿Qué es ton·km/L?</b> Mide cuántas toneladas·kilómetro se transportan por cada litro de combustible.<br>
+    <b>Fórmula:</b> ton·km/L = Peso entregado (ton) × KM recorridos / Litros consumidos<br>
+    Mayor valor = más productivo · Permite comparar unidades que transportan diferente volumen de carga.
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Calcular ton·km/L por patente y por mes
+    df_op = df[df['KM'] > 0].copy()
+    df_op['MES_STR'] = df_op['FECHA'].dt.to_period('M').astype(str)
+
+    # Agrupar KM y litros por patente × mes
+    km_lts_mes = (df_op.groupby(['DOMINIO','MES_STR'])
+                  .agg(KM=('KM','sum'), LITROS=('LITROS','sum'))
+                  .reset_index())
+
+    # Unir con carga
+    df_carga_str = df_carga_anio[['DOMINIO','MES_STR','PESO_TON']].copy()
+    tonkml_mes   = km_lts_mes.merge(df_carga_str, on=['DOMINIO','MES_STR'], how='left')
+    tonkml_mes['PESO_TON'] = tonkml_mes['PESO_TON'].fillna(0)
+    tonkml_mes['TONKML'] = np.where(
+        (tonkml_mes['PESO_TON'] > 0) & (tonkml_mes['LITROS'] > 0),
+        (tonkml_mes['PESO_TON'] * tonkml_mes['KM']) / tonkml_mes['LITROS'],
+        np.nan
+    ).round(2)
+    tonkml_mes['MODELO'] = tonkml_mes['DOMINIO'].apply(asignar_modelo)
+
+    # KPIs ton·km/L
+    tkml_valid = tonkml_mes['TONKML'].dropna()
+    if not tkml_valid.empty:
+        t1, t2, t3, t4 = st.columns(4)
+        tkml_prom  = tkml_valid.mean()
+        tkml_max   = tkml_valid.max()
+        tkml_min   = tkml_valid.min()
+        dom_max    = tonkml_mes.loc[tonkml_mes['TONKML'].idxmax(), 'DOMINIO'] if not tkml_valid.empty else '—'
+        dom_min    = tonkml_mes.loc[tonkml_mes['TONKML'].idxmin(), 'DOMINIO'] if not tkml_valid.empty else '—'
+        kpi(t1, '',          '📊 Promedio ton·km/L',  f'{tkml_prom:.2f}', 'toda la flota')
+        kpi(t2, 'kpi-green', f'🏆 Mejor — {dom_max}', f'{tkml_max:.2f}',  'mayor productividad')
+        kpi(t3, 'kpi-red',   f'⚠️ Peor — {dom_min}',  f'{tkml_min:.2f}',  'menor productividad')
+        kpi(t4, 'kpi-purple','📦 Período cubierto',   f'{tonkml_mes["MES_STR"].nunique()} meses', f'{anio_sel}')
+
+    # Gráfico líneas ton·km/L por patente
+    st.markdown('<br>', unsafe_allow_html=True)
+    fig_tkml = go.Figure()
+    for i, dom in enumerate(tonkml_mes['DOMINIO'].unique()):
+        sub = tonkml_mes[tonkml_mes['DOMINIO'] == dom].sort_values('MES_STR')
+        sub_valid = sub[sub['TONKML'].notna()]
+        if sub_valid.empty:
+            continue
+        fig_tkml.add_trace(go.Scatter(
+            x=sub_valid['MES_STR'], y=sub_valid['TONKML'],
+            name=dom, mode='lines+markers',
+            line=dict(color=COLORES_PAT[i % len(COLORES_PAT)], width=2.5),
+            marker=dict(size=8, line=dict(color='#fff', width=1.5)),
+            hovertemplate=f'<b>{dom}</b><br>%{{x}}: <b>%{{y:.2f}} ton·km/L</b><extra></extra>'
+        ))
+
+    if not tkml_valid.empty:
+        prom_tkml_linea = tkml_valid.mean()
+        fig_tkml.add_hline(
+            y=prom_tkml_linea, line_dash='dot', line_color='#f59e0b', line_width=2,
+            annotation_text=f'Promedio: {prom_tkml_linea:.2f}',
+            annotation_position='top right', annotation_font_color='#fbbf24', annotation_font_size=11)
+
+    fig_tkml.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(30,41,59,0.6)',
+        font=dict(color='#e2e8f0'),
+        xaxis=dict(gridcolor='#1e293b', tickfont=dict(color='#94a3b8', size=10), tickangle=-30),
+        yaxis=dict(gridcolor='#1e293b', tickfont=dict(color='#94a3b8'),
+                   title=dict(text='ton·km/L', font=dict(color='#64748b'))),
+        legend=dict(bgcolor='rgba(15,23,42,0.8)', bordercolor='#334155', borderwidth=1,
+                    orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+        height=400, margin=dict(l=10, r=10, t=50, b=50))
+    st.plotly_chart(fig_tkml, use_container_width=True)
+    st.caption('Línea amarilla = promedio flota · Sólo meses con datos de carga y telemetría simultáneos')
+
+    # Heatmap ton·km/L
+    st.markdown(f'<div class="sec-title">Mapa de Calor ton·km/L por Patente y Mes — {anio_sel}</div>',
+                unsafe_allow_html=True)
+    pivot_tkml = (tonkml_mes[tonkml_mes['TONKML'].notna()]
+                  .pivot_table(index='DOMINIO', columns='MES_STR', values='TONKML',
+                               aggfunc='mean')
+                  .reset_index())
+
+    if not pivot_tkml.empty and len(pivot_tkml.columns) > 1:
+        meses_tkml = [c for c in pivot_tkml.columns if c != 'DOMINIO']
+        z_tkml   = pivot_tkml[meses_tkml].values.tolist()
+        y_tkml   = pivot_tkml['DOMINIO'].tolist()
+        txt_tkml = [[f'{v:.2f}' if v is not None and not np.isnan(float(v)) else ''
+                     for v in row] for row in z_tkml]
+
+        fig_h_tkml = go.Figure(go.Heatmap(
+            z=z_tkml, x=meses_tkml, y=y_tkml,
+            text=txt_tkml, texttemplate='%{text}',
+            colorscale=[[0.0,'#7f1d1d'],[0.35,'#f59e0b'],[0.65,'#16a34a'],[1.0,'#052e16']],
+            colorbar=dict(title=dict(text='ton·km/L', font=dict(color='#94a3b8')),
+                          tickfont=dict(color='#94a3b8'), bgcolor='rgba(0,0,0,0)'),
+            hovertemplate='Patente: <b>%{y}</b><br>Mes: %{x}<br>ton·km/L: <b>%{z:.2f}</b><extra></extra>'
+        ))
+        fig_h_tkml.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(30,41,59,0.6)',
+            font=dict(color='#e2e8f0'),
+            xaxis=dict(tickfont=dict(color='#94a3b8', size=10), tickangle=-45, side='bottom'),
+            yaxis=dict(tickfont=dict(color='#94a3b8', size=10)),
+            height=max(260, len(y_tkml) * 44),
+            margin=dict(l=10, r=10, t=20, b=60))
+        st.plotly_chart(fig_h_tkml, use_container_width=True)
+        st.caption('Verde = alta productividad · Rojo = baja productividad · Gris = sin datos ese mes')
+
+    # Tabla detallada ton·km/L
+    with st.expander('📋 Ver tabla detallada ton·km/L por mes'):
+        tkml_show = (tonkml_mes[['DOMINIO','MODELO','MES_STR','PESO_TON','KM','LITROS','TONKML']]
+                     .copy()
+                     .sort_values(['DOMINIO','MES_STR']))
+        tkml_show.columns = ['Patente','Modelo','Mes','Peso (ton)','KM','Litros','ton·km/L']
+        tkml_show['Peso (ton)'] = tkml_show['Peso (ton)'].apply(lambda x: f'{x:,.1f}' if x > 0 else '—')
+        tkml_show['KM']         = tkml_show['KM'].apply(lambda x: f'{x:,.0f}')
+        tkml_show['Litros']     = tkml_show['Litros'].apply(lambda x: f'{x:,.0f}')
+        tkml_show['ton·km/L']   = tkml_show['ton·km/L'].apply(
+            lambda x: f'{x:.2f}' if x is not None and not np.isnan(x) else '—')
+        st.dataframe(tkml_show, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # ── Ranking ton·km/L por patente (acumulado del año) ─────────────────────
+    st.markdown(f'<div class="sec-title">Ranking Productividad de Carga — {anio_sel}</div>',
+                unsafe_allow_html=True)
+
+    rank_tkml = (tonkml_mes.groupby('DOMINIO')
+                 .agg(
+                     PESO_TON =('PESO_TON',  'sum'),
+                     KM       =('KM',        'sum'),
+                     LITROS   =('LITROS',    'sum'),
+                     MODELO   =('MODELO',    'first')
+                 ).reset_index())
+    rank_tkml['TONKML_ANUAL'] = np.where(
+        (rank_tkml['PESO_TON'] > 0) & (rank_tkml['LITROS'] > 0),
+        (rank_tkml['PESO_TON'] * rank_tkml['KM']) / rank_tkml['LITROS'],
+        np.nan
+    ).round(2)
+    rank_tkml = rank_tkml[rank_tkml['TONKML_ANUAL'].notna()].sort_values('TONKML_ANUAL', ascending=True)
+
+    if not rank_tkml.empty:
+        fig_rank = go.Figure([go.Bar(
+            y=rank_tkml['DOMINIO'],
+            x=rank_tkml['TONKML_ANUAL'],
+            orientation='h',
+            marker_color=[
+                '#22c55e' if v == rank_tkml['TONKML_ANUAL'].max()
+                else ('#ef4444' if v == rank_tkml['TONKML_ANUAL'].min() else '#3b82f6')
+                for v in rank_tkml['TONKML_ANUAL']
+            ],
+            text=[f'{v:.2f}' for v in rank_tkml['TONKML_ANUAL']],
+            textposition='outside',
+            textfont=dict(color='#e2e8f0', size=10),
+            hovertemplate='<b>%{y}</b><br>ton·km/L: <b>%{x:.2f}</b><extra></extra>'
+        )])
+        prom_r = rank_tkml['TONKML_ANUAL'].mean()
+        fig_rank.add_vline(x=prom_r, line_dash='dot', line_color='#f59e0b', line_width=2,
+                           annotation_text=f'Prom: {prom_r:.2f}',
+                           annotation_position='top',
+                           annotation_font_color='#fbbf24', annotation_font_size=11)
+        fig_rank.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(30,41,59,0.6)',
+            font=dict(color='#e2e8f0'),
+            xaxis=dict(gridcolor='#1e293b', tickfont=dict(color='#94a3b8'),
+                       title=dict(text='ton·km/L acumulado año', font=dict(color='#64748b'))),
+            yaxis=dict(gridcolor='#1e293b', tickfont=dict(color='#94a3b8', size=10)),
+            height=max(300, len(rank_tkml) * 50 + 80),
+            margin=dict(l=10, r=120, t=30, b=30), showlegend=False)
+        st.plotly_chart(fig_rank, use_container_width=True)
+        st.caption('🟢 Mayor productividad · 🔴 Menor productividad · 🔵 Resto · Línea amarilla = promedio flota')
+
+    st.caption(f'Fuente: reporte_hojas.xlsx (BI Expreso) · Telemetría Google Sheets · Año {anio_sel}')
