@@ -1067,56 +1067,89 @@ elif pg == "Datos Operativos":
         _x_min = _mat['L100KM'].min() * 0.95; _x_max = _mat['L100KM'].max() * 1.05
         _y_min = _mat['KG_KM'].min()  * 0.90; _y_max = _mat['KG_KM'].max()  * 1.10
         fig_mat = go.Figure()
-        # Fondo cuadrantes
-        for _xr, _yr, _fc, _lbl in [
-            ([_x_min, _l100_med], [_kgkm_med, _y_max], 'rgba(34,197,94,0.08)',  '🟢 Ideal'),
-            ([_l100_med, _x_max], [_kgkm_med, _y_max], 'rgba(249,115,22,0.08)', '🟠 Consumo alto'),
-            ([_x_min, _l100_med], [_y_min, _kgkm_med], 'rgba(245,158,11,0.08)', '🟡 Subutilizado'),
-            ([_l100_med, _x_max], [_y_min, _kgkm_med], 'rgba(239,68,68,0.08)',  '🔴 Crítico'),
-        ]:
+        # ── Fondos de cuadrante ──────────────────────────────────────────────
+        _quad_cfg = [
+            ([_x_min, _l100_med], [_kgkm_med, _y_max], 'rgba(34,197,94,0.12)',  '#22c55e', '🟢 IDEAL',
+             'Eficiente + bien cargado', _x_min, _y_max, 'top left'),
+            ([_l100_med, _x_max], [_kgkm_med, _y_max], 'rgba(249,115,22,0.12)', '#f97316', '🟠 CONSUMO ALTO',
+             'Carga OK · consumo excesivo', _x_max, _y_max, 'top right'),
+            ([_x_min, _l100_med], [_y_min, _kgkm_med], 'rgba(245,158,11,0.12)', '#f59e0b', '🟡 SUBUTILIZADO',
+             'Eficiente · poca carga/retornos vacíos', _x_min, _y_min, 'bottom left'),
+            ([_l100_med, _x_max], [_y_min, _kgkm_med], 'rgba(239,68,68,0.12)',  '#ef4444', '🔴 CRÍTICO',
+             'Consumo alto + baja carga', _x_max, _y_min, 'bottom right'),
+        ]
+        for _xr, _yr, _fc, _ec, _title, _sub, _ax, _ay, _apos in _quad_cfg:
             fig_mat.add_shape(type='rect', x0=_xr[0], x1=_xr[1], y0=_yr[0], y1=_yr[1],
-                fillcolor=_fc, line_width=0, layer='below')
-            fig_mat.add_annotation(x=(_xr[0]+_xr[1])/2, y=(_yr[0]+_yr[1])/2,
-                text=_lbl, showarrow=False, font=dict(size=11, color='rgba(255,255,255,0.25)'))
-        # Líneas divisorias
-        fig_mat.add_vline(x=_l100_med, line_dash='dot', line_color='#475569', line_width=1.5,
-            annotation_text=f'Mediana {_l100_med:.1f}', annotation_position='top',
-            annotation_font_color='#64748b', annotation_font_size=10)
-        fig_mat.add_hline(y=_kgkm_med, line_dash='dot', line_color='#475569', line_width=1.5,
-            annotation_text=f'Mediana {_kgkm_med:.0f} kg/km', annotation_position='right',
-            annotation_font_color='#64748b', annotation_font_size=10)
-        # Puntos
+                fillcolor=_fc, line=dict(color=_ec, width=0.5, dash='dot'), layer='below')
+            # Etiqueta en esquina (título + subtítulo en 2 líneas)
+            _xanchor = 'left' if 'left' in _apos else 'right'
+            _yanchor = 'top'  if 'top'  in _apos else 'bottom'
+            _pad_x   = (_x_max - _x_min) * 0.015 * (1 if _xanchor=='left' else -1)
+            _pad_y   = (_y_max - _y_min) * 0.025 * (-1 if _yanchor=='top' else 1)
+            fig_mat.add_annotation(
+                x=_ax + _pad_x, y=_ay + _pad_y,
+                text=f'<b>{_title}</b><br><span style="font-size:9px;">{_sub}</span>',
+                showarrow=False, xanchor=_xanchor, yanchor=_yanchor,
+                font=dict(size=11, color=_ec),
+                bgcolor='rgba(15,23,42,0.75)', borderpad=4
+            )
+        # ── Líneas divisorias ─────────────────────────────────────────────────
+        fig_mat.add_vline(x=_l100_med, line_dash='dash', line_color='#64748b', line_width=1.5)
+        fig_mat.add_hline(y=_kgkm_med, line_dash='dash', line_color='#64748b', line_width=1.5)
+        # Anotación ejes explicativa (arriba del gráfico)
+        fig_mat.add_annotation(x=_l100_med, y=_y_max, text=f'mediana L/100km = {_l100_med:.1f}',
+            showarrow=False, yanchor='bottom', font=dict(size=9, color='#64748b'),
+            bgcolor='rgba(15,23,42,0.7)', borderpad=3)
+        fig_mat.add_annotation(x=_x_min, y=_kgkm_med, text=f'mediana kg/km = {_kgkm_med:.0f}',
+            showarrow=False, xanchor='left', font=dict(size=9, color='#64748b'),
+            bgcolor='rgba(15,23,42,0.7)', borderpad=3)
+        # ── Puntos ────────────────────────────────────────────────────────────
         fig_mat.add_trace(go.Scatter(
             x=_mat['L100KM'], y=_mat['KG_KM'],
             mode='markers+text',
             text=_mat['DOMINIO'],
             textposition='top center',
-            textfont=dict(size=10, color='#e2e8f0'),
-            marker=dict(size=16, color=_mat['CUAD_COLOR'],
-                        line=dict(color='rgba(255,255,255,0.6)', width=2)),
+            textfont=dict(size=10, color='#f1f5f9', family='monospace'),
+            marker=dict(size=18, color=_mat['CUAD_COLOR'],
+                        line=dict(color='white', width=2),
+                        symbol='circle'),
             customdata=_mat[['CUAD_LABEL','CUAD_DESC','PCT_VACIOS','N_TOTAL','N_VACIOS','MODELO','KG_KM','PESO_TON']].values,
             hovertemplate=(
-                '<b>%{text}</b> (%{customdata[5]})<br>'
-                'L/100km: <b>%{x:.2f}</b><br>'
-                'Densidad carga: <b>%{y:.1f} kg/km</b><br>'
-                'Peso total: <b>%{customdata[7]:.1f} ton</b><br>'
-                'Cuadrante: %{customdata[0]}<br>'
-                'Viajes sin peso: <b>%{customdata[4]:.0f} de %{customdata[3]:.0f} (%{customdata[2]:.1f}%)</b><br>'
+                '<b>%{text}</b>  <i>%{customdata[5]}</i><br>'
+                '─────────────────────<br>'
+                '⛽ L/100km: <b>%{x:.2f}</b>  (mediana flota: ' + f'{_l100_med:.1f})<br>' +
+                '📦 kg/km: <b>%{y:.1f}</b>  (mediana flota: ' + f'{_kgkm_med:.0f})<br>' +
+                '⚖️ Peso total: <b>%{customdata[7]:.1f} ton</b><br>'
+                '🚫 Viajes sin peso: <b>%{customdata[4]:.0f} / %{customdata[3]:.0f} (%{customdata[2]:.1f}%)</b><br>'
+                '─────────────────────<br>'
+                '<b>%{customdata[0]}</b><br>'
                 '<i>%{customdata[1]}</i><extra></extra>'
             ),
             showlegend=False
         ))
         fig_mat.update_layout(
-            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(30,41,59,0.6)',
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(15,23,42,0.8)',
             font=dict(color='#e2e8f0'),
-            xaxis=dict(gridcolor='#1e293b', tickfont=dict(color='#94a3b8'),
-                       title=dict(text='← Más eficiente     L/100km     Menos eficiente →', font=dict(color='#64748b', size=11))),
-            yaxis=dict(gridcolor='#1e293b', tickfont=dict(color='#94a3b8'),
-                       title=dict(text='← Menos carga     kg/km     Más carga →', font=dict(color='#64748b', size=11))),
-            height=500, margin=dict(l=60, r=40, t=30, b=60)
+            xaxis=dict(
+                gridcolor='#1e293b', tickfont=dict(color='#94a3b8', size=11),
+                title=dict(
+                    text='L / 100 km   —   litros consumidos por cada 100 km recorridos   (← menor = más eficiente)',
+                    font=dict(color='#94a3b8', size=11)
+                ),
+                range=[_x_min, _x_max]
+            ),
+            yaxis=dict(
+                gridcolor='#1e293b', tickfont=dict(color='#94a3b8', size=11),
+                title=dict(
+                    text='kg / km   —   kg de carga entregados por km recorrido   (↑ mayor = más productivo)',
+                    font=dict(color='#94a3b8', size=11)
+                ),
+                range=[_y_min, _y_max]
+            ),
+            height=560, margin=dict(l=70, r=50, t=40, b=70)
         )
         st.plotly_chart(fig_mat, use_container_width=True)
-        st.caption('Hover sobre cada punto para ver diagnóstico completo · Líneas = mediana de la flota')
+        st.caption(f'Cada punto = una patente · Hover para diagnóstico completo · Líneas punteadas = mediana de la flota · L/100km: dato de telemetría · kg/km: carga del BI ÷ km telemetría')
         # Cards de diagnóstico por patente
         st.markdown('<div class="sec-title">📋 Diagnóstico Individual por Patente</div>', unsafe_allow_html=True)
         _mat_sorted = _mat.sort_values('CUAD_COLOR', key=lambda s: s.map({'#ef4444':0,'#f97316':1,'#f59e0b':2,'#22c55e':3}))
