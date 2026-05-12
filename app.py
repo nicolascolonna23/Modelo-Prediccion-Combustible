@@ -569,7 +569,6 @@ if pg == "Dashboard Principal":
         <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>Expreso Diemar &mdash; Dashboard LAD {anio_sel}</div>
         <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Telemetría flota LAD &middot; Año {anio_sel} &middot; Actualización automática</div>
         </div>""", unsafe_allow_html=True)
-    st.markdown(f'<div style="margin-bottom:12px;"><span class="price-badge">&#9981; Precio gasoil: <b>${precio_gasoil:,.0f}/L</b></span>&nbsp;&nbsp;<span style="font-size:.75rem;color:#64748b;">Fuente: {precio_fuente}</span></div>', unsafe_allow_html=True)
     st.markdown(f'<div class="sec-title">Métricas Globales — {anio_sel}</div>', unsafe_allow_html=True)
     lts_total  = df['LITROS'].sum() if 'LITROS' in df.columns else 0
     kms_total  = df['KM'].sum()     if 'KM'     in df.columns else 0
@@ -613,13 +612,11 @@ if pg == "Dashboard Principal":
         with col_t:
             st.markdown(f'<div class="truck-img-box"><img src="{img_url}" alt="{modelo}" /></div>', unsafe_allow_html=True)
             st.markdown('<br>', unsafe_allow_html=True)
-            n_activas = s['n']; n_total = s['total']
-            unidades_txt = f"{n_activas}/{n_total}" if n_activas < n_total else f"{n_activas}"
-            unidades_delta = f"{n_total - n_activas} sin datos" if n_activas < n_total else None
             sc1,sc2,sc3=st.columns(3)
-            sc1.metric('L/100km',f"{s['l100']:.1f}" if s['l100']>0 else '—', help=f'{modelo}')
-            sc2.metric('Unidades activas', unidades_txt, unidades_delta)
-            sc3.metric(f'Lts {anio_sel}',f"{s['lts']:,.0f}" if s['lts']>0 else '—')
+            sc1.metric('L/100km', f"{s['l100']:.1f}" if s['l100']>0 else '—')
+            sc2.metric('Unidades', f"{s['total']}")
+            lts_fmt = f"{s['lts']/1000:.1f}k" if s['lts']>=1000 else f"{s['lts']:.0f}"
+            sc3.metric(f'Lts {anio_sel}', lts_fmt if s['lts']>0 else '—')
             st.caption(f"Patentes: {pats_label} | {s['kms']:,.0f} km")
     st.divider()
     st.markdown(f'<div class="sec-title">Ranking de Eficiencia — {anio_sel}</div>', unsafe_allow_html=True)
@@ -780,7 +777,6 @@ elif pg == "Modelo Predictivo":
         <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>Modelo Predictivo &mdash; LAD</div>
         <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Entrenado con todo el histórico &middot; Regresión polinomial &middot; Simulador What-If</div>
         </div>""", unsafe_allow_html=True)
-    st.markdown(f'<span class="price-badge">&#9981; Precio gasoil: <b>${precio_gasoil:,.0f}/L</b></span>&nbsp;&nbsp;<span style="font-size:.75rem;color:#64748b;">Fuente: {precio_fuente}</span>', unsafe_allow_html=True)
     anos_en_hist=(sorted(df_full_clean['FECHA'].dt.year.unique().tolist()) if 'FECHA' in df_full_clean.columns else [])
     anos_str=" · ".join(str(a) for a in anos_en_hist)
     st.markdown(f'<div class="training-badge">🧠 Modelo entrenado con {n_meses_entrenamiento} meses históricos ({anos_str})</div>', unsafe_allow_html=True)
@@ -837,7 +833,7 @@ elif pg == "Modelo Predictivo":
         hist_x=[all_labels[i] for i,v in enumerate(all_hist) if v is not None]; hist_y=[v for v in all_hist if v is not None]
         fig.add_trace(go.Scatter(x=hist_x,y=hist_y,mode='lines+markers',line=dict(color='#ef4444',width=2.5),marker=dict(size=7,color='#ef4444',line=dict(color='#fff',width=1.5)),name='Histórico',hovertemplate='%{x}<br>Real: <b>%{y:.2f} L/100km</b><extra></extra>'))
         pred_x=[all_labels[i] for i,v in enumerate(all_pred) if v is not None]; pred_y=[v for v in all_pred if v is not None]
-        fig.add_trace(go.Scatter(x=pred_x,y=pred_y,mode='lines+markers',line=dict(color='#f97316',width=2.5,dash='dash'),marker=dict(size=9,color='#f97316',symbol='diamond',line=dict(color='#fff',width=1.5)),name='Predicción',hovertemplate='%{x}<br>Pred: <b>%{y:.2f} L/100km</b><extra></extra>'))
+        fig.add_trace(go.Scatter(x=pred_x,y=pred_y,mode='lines+markers',line=dict(color='#fbbf24',width=4,dash='dash'),marker=dict(size=11,color='#fbbf24',symbol='diamond',line=dict(color='#1e293b',width=1.5)),name='Predicción',hovertemplate='%{x}<br>Pred: <b>%{y:.2f} L/100km</b><extra></extra>'))
         for yr in unique_years[1:]:
             yr_label=f'Ene {yr}'
             if yr_label in all_labels:
@@ -848,7 +844,7 @@ elif pg == "Modelo Predictivo":
             yaxis=dict(gridcolor='#1e293b',linecolor='#334155',tickfont=dict(color='#94a3b8',size=11),title=dict(text='L/100km',font=dict(color='#64748b'))),
             height=450,margin=dict(l=10,r=10,t=50,b=60),hovermode='x unified')
         st.plotly_chart(fig, use_container_width=True)
-        st.caption(f'±1.5σ intervalo de confianza | Línea roja = histórico ({n_meses_entrenamiento} meses) | Línea naranja = predicción')
+        st.caption(f'±1.5σ intervalo de confianza | 🔴 Línea roja = histórico ({n_meses_entrenamiento} meses) | 🟡 Línea amarilla = predicción')
         st.divider()
         st.markdown('<div class="sec-title">🚨 Alerta de Desvío — Predicción vs. Real</div>', unsafe_allow_html=True)
         if len(hist)>=3:
