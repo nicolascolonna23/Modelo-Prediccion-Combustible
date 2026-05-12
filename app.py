@@ -295,6 +295,47 @@ def cargar_viajes_todos():
         return pd.DataFrame()
 @st.cache_data(ttl=3600)
 def obtener_precio_gasoil():
+    # 1) API oficial Secretaría de Energía Argentina (Resolución 314/2016)
+    try:
+        CKAN_URL = (
+            "https://datos.energia.gob.ar/api/3/action/datastore_search"
+            "?resource_id=80ac25de-a44a-4445-9215-090cf55cfda5"
+            "&limit=1000"
+        )
+        r = requests.get(CKAN_URL, timeout=12)
+        data = r.json()
+        records = data.get('result', {}).get('records', [])
+        if records:
+            import re as _re
+            gasoil_rows = [
+                rec for rec in records
+                if any(
+                    kw in str(rec.get('producto', '')).upper()
+                    for kw in ['GASOIL', 'DIESEL', 'GAS OIL']
+                )
+            ]
+            if not gasoil_rows:
+                gasoil_rows = records  # fallback: todos los registros
+            # Buscar campo de precio (varía según versión del dataset)
+            precio_fields = ['precio_ars', 'precio', 'precio_venta', 'importe', 'valor']
+            precios = []
+            for rec in gasoil_rows:
+                for f in precio_fields:
+                    v = rec.get(f)
+                    if v is not None:
+                        try:
+                            p = float(str(v).replace(',', '.'))
+                            if 500 < p < 10000:
+                                precios.append(p)
+                                break
+                        except (ValueError, TypeError):
+                            pass
+            if precios:
+                precio_med = float(sorted(precios)[len(precios)//2])
+                return precio_med, "datos.energia.gob.ar (oficial)"
+    except Exception:
+        pass
+    # 2) Fallback: surtidores.com.ar
     try:
         import re
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -556,11 +597,11 @@ if pg == "Dashboard Principal":
     st.divider()
     st.markdown(f'<div class="sec-title">Rendimiento por Modelo — {anio_sel}</div>', unsafe_allow_html=True)
     def stats_modelo(patentes_lista):
-        if 'DOMINIO' not in df.columns: return {'l100':0,'lts':0,'kms':0,'n':0}
+        if 'DOMINIO' not in df.columns: return {'l100':0,'lts':0,'kms':0,'n':0,'total':len(patentes_lista)}
         sub = df[df['DOMINIO'].isin(patentes_lista)]
-        if sub.empty: return {'l100':0,'lts':0,'kms':0,'n':0}
+        if sub.empty: return {'l100':0,'lts':0,'kms':0,'n':0,'total':len(patentes_lista)}
         lts=sub['LITROS'].sum(); kms=sub['KM'].sum()
-        return {'l100':round(lts/kms*100,2) if kms>0 else 0,'lts':lts,'kms':kms,'n':sub['DOMINIO'].nunique()}
+        return {'l100':round(lts/kms*100,2) if kms>0 else 0,'lts':lts,'kms':kms,'n':sub['DOMINIO'].nunique(),'total':len(patentes_lista)}
     todas_patentes   = df['DOMINIO'].dropna().unique().tolist() if 'DOMINIO' in df.columns else []
     stralis_patentes = [p for p in todas_patentes if p not in SWAY_PATENTES and p not in SCANIA_PATENTES]
     s_sway=stats_modelo(SWAY_PATENTES); s_scania=stats_modelo(SCANIA_PATENTES); s_stralis=stats_modelo(stralis_patentes)
@@ -572,10 +613,13 @@ if pg == "Dashboard Principal":
         with col_t:
             st.markdown(f'<div class="truck-img-box"><img src="{img_url}" alt="{modelo}" /></div>', unsafe_allow_html=True)
             st.markdown('<br>', unsafe_allow_html=True)
+            n_activas = s['n']; n_total = s['total']
+            unidades_txt = f"{n_activas}/{n_total}" if n_activas < n_total else f"{n_activas}"
+            unidades_delta = f"{n_total - n_activas} sin datos" if n_activas < n_total else None
             sc1,sc2,sc3=st.columns(3)
-            sc1.metric(f'{modelo} — L/100km',f"{s['l100']:.1f}" if s['l100']>0 else '—')
-            sc2.metric('Unidades',f"{s['n']}")
-            sc3.metric(f'Litros {anio_sel}',f"{s['lts']:,.0f}" if s['lts']>0 else '—')
+            sc1.metric('L/100km',f"{s['l100']:.1f}" if s['l100']>0 else '—', help=f'{modelo}')
+            sc2.metric('Unidades activas', unidades_txt, unidades_delta)
+            sc3.metric(f'Lts {anio_sel}',f"{s['lts']:,.0f}" if s['lts']>0 else '—')
             st.caption(f"Patentes: {pats_label} | {s['kms']:,.0f} km")
     st.divider()
     st.markdown(f'<div class="sec-title">Ranking de Eficiencia — {anio_sel}</div>', unsafe_allow_html=True)
@@ -755,17 +799,26 @@ elif pg == "Modelo Predictivo":
         Xf=poly.transform(t_fut)
         pred_l100=np.clip(model_l100.predict(Xf),0,100); pred_lts=np.clip(model_lts.predict(Xf),0,None)
         meses_fut=[(ultimo+i+1).strftime('%b %Y') for i in range(n_pred)]
-        st.info(f'📐 Grado polinomial: {degree} | R² = {r2_l100:.3f} | σ residuos = {std_res:.2f} L/100km')
         st.markdown(f'<div class="sec-title">Predicción meses restantes {ultimo.year} ({n_pred} meses)</div>', unsafe_allow_html=True)
+        def render_pred_card(mes, l100_p, lts_p, precio_gasoil):
+            costo_p = lts_p * precio_gasoil
+            return (
+                f'<div class="kpi-card" style="background:#1e293b;border:1px solid #334155;border-radius:12px;padding:14px 10px;text-align:center;">'
+                f'<div style="font-size:.72rem;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">{mes}</div>'
+                f'<div style="font-size:1.55rem;font-weight:700;color:#f97316;line-height:1.1;">{l100_p:.2f}</div>'
+                f'<div style="font-size:.78rem;color:#94a3b8;margin-bottom:6px;">L/100km</div>'
+                f'<div style="border-top:1px solid #334155;padding-top:6px;margin-top:2px;">'
+                f'<div style="font-size:.82rem;color:#e2e8f0;font-weight:600;">{lts_p:,.0f} L</div>'
+                f'<div style="font-size:.75rem;color:#64748b;">${costo_p/1e6:.2f}M est.</div>'
+                f'</div></div>'
+            )
         n_kpi=min(4,n_pred); kpi_cols=st.columns(n_kpi)
         for c,mes,l100_p,lts_p in zip(kpi_cols,meses_fut[:n_kpi],pred_l100[:n_kpi],pred_lts[:n_kpi]):
-            costo_p=lts_p*precio_gasoil
-            c.metric(label=f'Predicción {mes}',value=f'{l100_p:.2f} L/100km',delta=f'{lts_p:,.0f} L | ${costo_p/1e6:.2f}M')
+            with c: st.markdown(render_pred_card(mes,l100_p,lts_p,precio_gasoil), unsafe_allow_html=True)
         if n_pred>4:
             kpi_cols2=st.columns(min(4,n_pred-4))
             for c,mes,l100_p,lts_p in zip(kpi_cols2,meses_fut[4:],pred_l100[4:],pred_lts[4:]):
-                costo_p=lts_p*precio_gasoil
-                c.metric(label=f'Predicción {mes}',value=f'{l100_p:.2f} L/100km',delta=f'{lts_p:,.0f} L | ${costo_p/1e6:.2f}M')
+                with c: st.markdown(render_pred_card(mes,l100_p,lts_p,precio_gasoil), unsafe_allow_html=True)
         st.divider()
         st.markdown('<div class="sec-title">Evolución histórica completa con Proyección</div>', unsafe_allow_html=True)
         all_labels=[str(p) for p in hist['MES_PERIODO']]+meses_fut
@@ -784,7 +837,7 @@ elif pg == "Modelo Predictivo":
         hist_x=[all_labels[i] for i,v in enumerate(all_hist) if v is not None]; hist_y=[v for v in all_hist if v is not None]
         fig.add_trace(go.Scatter(x=hist_x,y=hist_y,mode='lines+markers',line=dict(color='#ef4444',width=2.5),marker=dict(size=7,color='#ef4444',line=dict(color='#fff',width=1.5)),name='Histórico',hovertemplate='%{x}<br>Real: <b>%{y:.2f} L/100km</b><extra></extra>'))
         pred_x=[all_labels[i] for i,v in enumerate(all_pred) if v is not None]; pred_y=[v for v in all_pred if v is not None]
-        fig.add_trace(go.Scatter(x=pred_x,y=pred_y,mode='lines+markers',line=dict(color='#60a5fa',width=2.5,dash='dash'),marker=dict(size=9,color='#60a5fa',symbol='diamond',line=dict(color='#fff',width=1.5)),name='Predicción',hovertemplate='%{x}<br>Pred: <b>%{y:.2f} L/100km</b><extra></extra>'))
+        fig.add_trace(go.Scatter(x=pred_x,y=pred_y,mode='lines+markers',line=dict(color='#f97316',width=2.5,dash='dash'),marker=dict(size=9,color='#f97316',symbol='diamond',line=dict(color='#fff',width=1.5)),name='Predicción',hovertemplate='%{x}<br>Pred: <b>%{y:.2f} L/100km</b><extra></extra>'))
         for yr in unique_years[1:]:
             yr_label=f'Ene {yr}'
             if yr_label in all_labels:
@@ -795,7 +848,7 @@ elif pg == "Modelo Predictivo":
             yaxis=dict(gridcolor='#1e293b',linecolor='#334155',tickfont=dict(color='#94a3b8',size=11),title=dict(text='L/100km',font=dict(color='#64748b'))),
             height=450,margin=dict(l=10,r=10,t=50,b=60),hovermode='x unified')
         st.plotly_chart(fig, use_container_width=True)
-        st.caption(f'±1.5σ intervalo de confianza | Línea roja = histórico ({n_meses_entrenamiento} meses) | Línea azul = predicción')
+        st.caption(f'±1.5σ intervalo de confianza | Línea roja = histórico ({n_meses_entrenamiento} meses) | Línea naranja = predicción')
         st.divider()
         st.markdown('<div class="sec-title">🚨 Alerta de Desvío — Predicción vs. Real</div>', unsafe_allow_html=True)
         if len(hist)>=3:
