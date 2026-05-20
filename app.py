@@ -18,6 +18,7 @@ st.set_page_config(
     layout="wide",
 )
 LOGO_URL    = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/logo_dm.png"
+LOGO_SIDEBAR_URL = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/logo_diemar4.png"
 IVECO_URL   = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/S-Way-6x2-1.webp"
 SCANIA_URL  = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/2016p.png"
 STRALIS_URL = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/image.png"
@@ -76,11 +77,8 @@ DARK_CSS = """
 [data-testid="stSidebar"] [role="radiogroup"] label { color: #f1f5f9 !important; }
 [data-testid="stSidebar"] [role="radiogroup"] label p { color: #f1f5f9 !important; }
 
-/* Logo del sidebar - fondo blanco para que se vea */
+/* Logo del sidebar - sin fondo (transparente) */
 [data-testid="stSidebar"] [data-testid="stImage"] {
-    background: #ffffff;
-    border-radius: 8px;
-    padding: 12px;
     margin: 8px 0;
 }
 
@@ -199,7 +197,7 @@ pg = st.sidebar.radio(
     label_visibility="collapsed"
 )
 st.sidebar.markdown("---")
-st.sidebar.image(LOGO_URL, width=160)
+st.sidebar.image(LOGO_SIDEBAR_URL, width=160)
 @st.cache_data(ttl=600)
 def cargar_datos():
     try:
