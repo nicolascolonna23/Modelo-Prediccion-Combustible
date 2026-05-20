@@ -17,7 +17,7 @@ st.set_page_config(
     page_icon="🚛",
     layout="wide",
 )
-LOGO_URL    = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/logo_diemar4.png"
+LOGO_URL    = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/logo_dm.png"
 IVECO_URL   = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/S-Way-6x2-1.webp"
 SCANIA_URL  = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/2016p.png"
 STRALIS_URL = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/image.png"
@@ -40,8 +40,50 @@ DARK_CSS = """
 <style>
 [data-testid="stAppViewContainer"] { background: #f5f7fa; }
 [data-testid="stSidebar"] { background: #1e3a5f; }
-[data-testid="stSidebar"] * { color: #e2e8f0 !important; }
-[data-testid="stSidebar"] .sidebar-filter-header { color: #94a3b8 !important; }
+[data-testid="stSidebar"] * { color: #f1f5f9 !important; }
+[data-testid="stSidebar"] hr { border-color: #334155 !important; }
+
+/* Inputs del sidebar - fondo blanco, texto oscuro para que se vean */
+[data-testid="stSidebar"] [data-baseweb="select"] > div,
+[data-testid="stSidebar"] [data-baseweb="select"] input,
+[data-testid="stSidebar"] input[type="text"] {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+    border-color: #cbd5e1 !important;
+}
+[data-testid="stSidebar"] [data-baseweb="select"] *,
+[data-testid="stSidebar"] [data-baseweb="popover"] * {
+    color: #0f172a !important;
+}
+[data-testid="stSidebar"] [data-baseweb="select"] svg { fill: #0f172a !important; }
+
+/* Dropdowns desplegados (popover) - fondo blanco */
+[data-baseweb="popover"] [role="listbox"],
+[data-baseweb="popover"] ul,
+[data-baseweb="popover"] li {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+}
+[data-baseweb="popover"] li:hover { background-color: #eff6ff !important; }
+
+/* Tags de multiselect (patentes seleccionadas) */
+[data-testid="stSidebar"] [data-baseweb="tag"] {
+    background-color: #2563eb !important;
+}
+[data-testid="stSidebar"] [data-baseweb="tag"] span { color: #ffffff !important; }
+
+/* Radio buttons del navegador */
+[data-testid="stSidebar"] [role="radiogroup"] label { color: #f1f5f9 !important; }
+[data-testid="stSidebar"] [role="radiogroup"] label p { color: #f1f5f9 !important; }
+
+/* Logo del sidebar - fondo blanco para que se vea */
+[data-testid="stSidebar"] [data-testid="stImage"] {
+    background: #ffffff;
+    border-radius: 8px;
+    padding: 12px;
+    margin: 8px 0;
+}
+
 section[data-testid="stMain"] { background: #f5f7fa; }
 .stMarkdown, .stCaption, label, p, span, div { color: #1e293b; }
 [data-testid="stMetricValue"] { color: #0f172a !important; }
@@ -141,11 +183,13 @@ section[data-testid="stMain"] { background: #f5f7fa; }
     padding:2px 8px; display:inline-block; font-size:.72rem; color:#3730a3; font-weight:600;
 }
 .dm-header {
-    background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
+    background: #ffffff;
     border-radius: 10px; padding: 18px 24px; margin-bottom: 18px;
-    box-shadow: 0 2px 6px rgba(30,58,95,0.2);
+    box-shadow: 0 2px 6px rgba(30,58,95,0.08);
+    border-left: 5px solid #1e3a5f;
 }
-.dm-header * { color: #ffffff !important; }
+.dm-header-title { font-size:1.5rem; font-weight:800; color:#1e3a5f; }
+.dm-header-sub { font-size:.85rem; color:#64748b; margin-top:4px; }
 </style>
 """
 pg = st.sidebar.radio(
@@ -586,8 +630,8 @@ if pg == "Dashboard Principal":
     with col_logo: st.image(LOGO_URL, width=130)
     with col_title:
         st.markdown(f"""<div class='dm-header'>
-        <div style='font-size:1.5rem;font-weight:800;'>Expreso Diemar — Dashboard LAD {anio_sel}</div>
-        <div style='font-size:.85rem;opacity:.85;margin-top:4px;'>Telemetría flota LAD · Año {anio_sel} · Actualización automática</div>
+        <div class='dm-header-title'>Expreso Diemar — Dashboard LAD {anio_sel}</div>
+        <div class='dm-header-sub'>Telemetría flota LAD · Año {anio_sel} · Actualización automática</div>
         </div>""", unsafe_allow_html=True)
     st.markdown(f'<div class="sec-title">Métricas Globales — {anio_sel}</div>', unsafe_allow_html=True)
     lts_total  = df['LITROS'].sum() if 'LITROS' in df.columns else 0
@@ -791,8 +835,8 @@ elif pg == "Modelo Predictivo":
     with col_logo2: st.image(LOGO_URL, width=130)
     with col_title2:
         st.markdown("""<div class='dm-header'>
-        <div style='font-size:1.5rem;font-weight:800;'>Modelo Predictivo — LAD</div>
-        <div style='font-size:.85rem;opacity:.85;margin-top:4px;'>Entrenado con todo el histórico · Regresión polinomial · Simulador What-If</div>
+        <div class='dm-header-title'>Modelo Predictivo — LAD</div>
+        <div class='dm-header-sub'>Entrenado con todo el histórico · Regresión polinomial · Simulador What-If</div>
         </div>""", unsafe_allow_html=True)
     anos_en_hist=(sorted(df_full_clean['FECHA'].dt.year.unique().tolist()) if 'FECHA' in df_full_clean.columns else [])
     anos_str=" · ".join(str(a) for a in anos_en_hist)
@@ -939,8 +983,8 @@ elif pg == "Análisis por Patente":
     with col_logo3: st.image(LOGO_URL, width=130)
     with col_title3:
         st.markdown(f"""<div class='dm-header'>
-        <div style='font-size:1.5rem;font-weight:800;'>Análisis por Patente — {anio_sel}</div>
-        <div style='font-size:.85rem;opacity:.85;margin-top:4px;'>Consumo · IER v6 · Excesos velocidad · Promedios</div>
+        <div class='dm-header-title'>Análisis por Patente — {anio_sel}</div>
+        <div class='dm-header-sub'>Consumo · IER v6 · Excesos velocidad · Promedios</div>
         </div>""", unsafe_allow_html=True)
     if df.empty or 'DOMINIO' not in df.columns: st.warning('Sin datos disponibles.'); st.stop()
     resumen=df.groupby('DOMINIO').agg(LITROS_TOTAL=('LITROS','sum'),KM_TOTAL=('KM','sum'),MESES=('MES_PERIODO','nunique')).reset_index()
@@ -1091,8 +1135,8 @@ elif pg == "Datos Operativos":
     with col_logo4: st.image(LOGO_URL, width=130)
     with col_title4:
         st.markdown(f"""<div class='dm-header'>
-        <div style='font-size:1.5rem;font-weight:800;'>Datos Operativos — {anio_sel}</div>
-        <div style='font-size:.85rem;opacity:.85;margin-top:4px;'>Peso entregado por patente · Ton·km/L · Productividad de carga</div>
+        <div class='dm-header-title'>Datos Operativos — {anio_sel}</div>
+        <div class='dm-header-sub'>Peso entregado por patente · Ton·km/L · Productividad de carga</div>
         </div>""", unsafe_allow_html=True)
     if df_carga_raw is None or df_carga_raw.empty:
         st.warning('No hay datos de carga disponibles. Verificá la conexión al sistema BI (reporte_hojas.xlsx).')
