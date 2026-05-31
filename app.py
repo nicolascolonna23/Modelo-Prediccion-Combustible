@@ -1,7 +1,8 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-#  EXPRESO DIEMAR — Dashboard de Monitoreo de Flota v7
+#  EXPRESO DIEMAR — Dashboard de Monitoreo de Flota v7.1
 #  IER-CHOFER (L100 · Conducción · Velocidad)
 # ═══════════════════════════════════════════════════════════════════════════════
+import re
 import pandas as pd
 import streamlit as st
 import numpy as np
@@ -36,7 +37,7 @@ URL_UNID = f"{BASE_URL}&gid=882343299"
 URL_VEL  = f"{BASE_URL}&gid=1563993963"
 CARGA_URL = "http://bi.sistemaexpreso.com.ar/reporte_hojas.xlsx"
 
-# ── Conducción (CONDUCCION_MAESTRO en Sheets) ──
+# ── Conducción (DATOS MANEJO en Sheets, antes CONDUCCION_MAESTRO) ──
 COND_BASE = "https://docs.google.com/spreadsheets/d/1teVcN0ejyvGbjWwWOHTmZ8I-17xyGZ0d8hxJ7dwSKm0/pub?output=csv"
 URL_COND  = f"{COND_BASE}&gid=1146371669"
 
@@ -44,7 +45,7 @@ URL_COND  = f"{COND_BASE}&gid=1146371669"
 GAST_BASE = "https://docs.google.com/spreadsheets/d/1u7cckay0IJ60bfoKk2OZo-TjCvTbH9O1wKxNFdSKDCQ/pub?output=csv"
 URL_GAST  = f"{GAST_BASE}&gid=33208473"
 
-# Todas las patentes LAD conocidas (telemetría + fijas)
+# Patentes LAD fijas conocidas
 PATENTES_LAD_FIJAS = set(SWAY_PATENTES + SCANIA_PATENTES)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -145,6 +146,35 @@ pg = st.sidebar.radio(
 )
 st.sidebar.markdown("---")
 st.sidebar.image(LOGO_SIDEBAR_URL, width=160)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  HELPERS
+# ═══════════════════════════════════════════════════════════════════════════════
+def _parse_monto(v):
+    """Parseo robusto de montos: detecta formato argentino o US automáticamente."""
+    if v is None: return 0.0
+    s = str(v).strip()
+    if not s or s.lower() in ('nan', 'none', ''): return 0.0
+    s = re.sub(r'[\$\s]', '', s)
+    if not s: return 0.0
+    has_dot   = '.' in s
+    has_comma = ',' in s
+    if has_dot and has_comma:
+        # El símbolo más a la derecha es el decimal
+        if s.rindex(',') > s.rindex('.'):
+            s = s.replace('.', '').replace(',', '.')   # arg: 158.133,60 -> 158133.60
+        else:
+            s = s.replace(',', '')                      # us:  158,133.60 -> 158133.60
+    elif has_comma:
+        partes = s.split(',')
+        if len(partes) == 2 and len(partes[1]) <= 2:
+            s = s.replace(',', '.')                     # decimal arg sin miles
+        else:
+            s = s.replace(',', '')                      # separador miles
+    try:
+        return float(s)
+    except:
+        return 0.0
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  CARGA DE DATOS
@@ -249,7 +279,6 @@ def cargar_velocidad():
 @st.cache_data(ttl=3600)
 def cargar_carga():
     try:
-        import re
         df = pd.read_excel(CARGA_URL)
         df.columns = [str(c).strip() for c in df.columns]
         col_unid   = next((c for c in df.columns if 'UNID'    in c.upper()), None)
@@ -275,7 +304,6 @@ def cargar_carga():
 @st.cache_data(ttl=3600)
 def cargar_viajes_todos():
     try:
-        import re
         df = pd.read_excel(CARGA_URL)
         df.columns = [str(c).strip() for c in df.columns]
         col_unid   = next((c for c in df.columns if 'UNID'    in c.upper()), None)
@@ -301,46 +329,95 @@ def cargar_viajes_todos():
 
 @st.cache_data(ttl=1800)
 def cargar_conduccion():
-    """Lee CONSOLIDADO del CONDUCCION_MAESTRO Google Sheets."""
+    """
+    Lee hoja DATOS MANEJO (antes CONDUCCION_MAESTRO).
+    Detección dinámica de fila header buscando 'DOMINIO' o 'PATENTE'.
+    """
     try:
-        df = pd.read_csv(URL_COND, skiprows=4, header=0)
+        df_raw = pd.read_csv(URL_COND, header=None, dtype=str)
+        if df_raw.empty:
+            return pd.DataFrame()
+
+        # Buscar fila del header escaneando las primeras 15 filas
+        header_row = None
+        for i in range(min(15, len(df_raw))):
+            row_txt = ' '.join(df_raw.iloc[i].fillna('').astype(str).str.upper().tolist())
+            if ('DOMINIO' in row_txt or 'PATENTE' in row_txt) and \
+               ('SCORE' in row_txt or 'CONDUCCION' in row_txt or 'CONDUCCIÓN' in row_txt or 'RALENT' in row_txt):
+                header_row = i
+                break
+
+        if header_row is None:
+            for i in range(min(15, len(df_raw))):
+                row_txt = ' '.join(df_raw.iloc[i].fillna('').astype(str).str.upper().tolist())
+                if 'DOMINIO' in row_txt or 'PATENTE' in row_txt:
+                    header_row = i
+                    break
+
+        if header_row is None:
+            return pd.DataFrame()
+
+        df = pd.read_csv(URL_COND, skiprows=header_row, header=0)
         df.columns = [str(c).strip().upper() for c in df.columns]
+
         col_map = {}
         for c in df.columns:
             cu = c.upper()
-            if   'MES'    in cu and 'PERÍODO' not in cu: col_map[c] = 'MES'
-            elif 'DOMINIO' in cu or 'PATENTE' in cu:     col_map[c] = 'DOMINIO'
-            elif 'MODELO' in cu:                          col_map[c] = 'MODELO'
-            elif 'RALENTI' in cu:                         col_map[c] = 'RALENTI_10'
-            elif 'ACELER' in cu:                          col_map[c] = 'ACELERACION_10'
-            elif 'ANTICIP' in cu:                         col_map[c] = 'ANTICIPACION_10'
-            elif 'FRENADO' in cu or 'FRENO' in cu:       col_map[c] = 'FRENADO_10'
-            elif 'SCORE' in cu or 'CONDUCCION' in cu:    col_map[c] = 'SCORE_CONDUCCION'
+            if   'DOMINIO' in cu or 'PATENTE' in cu:                col_map[c] = 'DOMINIO'
+            elif 'MES'     in cu and 'PERÍODO' not in cu:           col_map[c] = 'MES'
+            elif 'MODELO'  in cu:                                    col_map[c] = 'MODELO'
+            elif 'RALENT'  in cu:                                    col_map[c] = 'RALENTI_10'
+            elif 'ACELER'  in cu:                                    col_map[c] = 'ACELERACION_10'
+            elif 'ANTICIP' in cu:                                    col_map[c] = 'ANTICIPACION_10'
+            elif 'FRENO'   in cu or 'FRENAD' in cu:                  col_map[c] = 'FRENADO_10'
+            elif 'SCORE'   in cu or 'PUNT'   in cu or 'CONDUC' in cu: col_map[c] = 'SCORE_CONDUCCION'
         df = df.rename(columns=col_map)
-        expected = ['MES','DOMINIO','MODELO','RALENTI_10','ACELERACION_10','ANTICIPACION_10','FRENADO_10','SCORE_CONDUCCION']
-        if len(df.columns) >= 8:
-            rename_pos = {df.columns[i]: expected[i] for i in range(min(8, len(df.columns)))}
-            df = df.rename(columns=rename_pos)
-        if 'DOMINIO' not in df.columns: return pd.DataFrame()
+
+        if 'DOMINIO' not in df.columns:
+            return pd.DataFrame()
+
+        # Si no detectó SCORE por nombre, buscar columna numérica 0-10
+        if 'SCORE_CONDUCCION' not in df.columns:
+            for c in reversed(df.columns.tolist()):
+                if c in ('DOMINIO','MES','MODELO'): continue
+                try:
+                    vals = pd.to_numeric(df[c].astype(str).str.replace(',','.', regex=False), errors='coerce')
+                    if vals.dropna().between(0, 10).mean() > 0.5:
+                        df = df.rename(columns={c: 'SCORE_CONDUCCION'})
+                        break
+                except:
+                    continue
+
         df['DOMINIO'] = df['DOMINIO'].astype(str).str.strip().str.upper()
-        df = df[~df['DOMINIO'].isin(['', 'NAN', 'DOMINIO', 'PATENTE'])].copy()
-        def parse_mes(v):
-            try:
-                v = str(v).strip()
-                if v.isdigit():
-                    return pd.Timestamp('1899-12-30') + pd.Timedelta(days=int(v))
-                return pd.to_datetime(v, errors='coerce')
-            except: return pd.NaT
-        if 'MES' in df.columns:
-            df['MES_DT'] = df['MES'].apply(parse_mes)
-            df['MES_PERIODO'] = df['MES_DT'].apply(lambda x: x.to_period('M') if pd.notna(x) else None)
+        df['DOMINIO'] = df['DOMINIO'].str.replace(r'\s+', '', regex=True)
+        df = df[~df['DOMINIO'].isin(['', 'NAN', 'NONE', 'DOMINIO', 'PATENTE'])].copy()
+
         for col in ['RALENTI_10','ACELERACION_10','ANTICIPACION_10','FRENADO_10','SCORE_CONDUCCION']:
             if col in df.columns:
                 df[col] = pd.to_numeric(
-                    df[col].astype(str).str.replace(',','.', regex=False), errors='coerce'
+                    df[col].astype(str).str.replace(',','.', regex=False).str.strip(),
+                    errors='coerce'
                 )
+
+        def parse_mes(v):
+            try:
+                v = str(v).strip()
+                if not v or v.lower() == 'nan': return pd.NaT
+                if v.isdigit():
+                    return pd.Timestamp('1899-12-30') + pd.Timedelta(days=int(v))
+                return pd.to_datetime(v, errors='coerce', dayfirst=True)
+            except:
+                return pd.NaT
+
+        if 'MES' in df.columns:
+            df['MES_DT'] = df['MES'].apply(parse_mes)
+            df['MES_PERIODO'] = df['MES_DT'].apply(lambda x: x.to_period('M') if pd.notna(x) else None)
+
+        if 'SCORE_CONDUCCION' in df.columns:
+            df = df[df['SCORE_CONDUCCION'].notna()].copy()
+
         return df.reset_index(drop=True)
-    except:
+    except Exception:
         return pd.DataFrame()
 
 @st.cache_data(ttl=1800)
@@ -348,38 +425,31 @@ def cargar_gastos(patentes_lad=None):
     """
     Lee hoja de gastos de reparaciones.
     Col A = fecha, Col B = patente, Col C = monto.
-    Filtra sólo patentes LAD.
+    Parseo robusto: detecta formato arg ($158.133,60) o US (158133.6).
     """
     try:
         df = pd.read_csv(URL_GAST, header=0)
-        # Tomar las primeras 3 columnas sin importar el nombre
+        if df.empty or len(df.columns) < 3:
+            return pd.DataFrame()
+
         df = df.iloc[:, :3].copy()
-        df.columns = ['FECHA_RAW', 'DOMINIO', 'TOTAL_GASTOS']
+        df.columns = ['FECHA_RAW', 'DOMINIO', 'MONTO_RAW']
 
-        # Limpiar patente
         df['DOMINIO'] = df['DOMINIO'].astype(str).str.strip().str.upper()
-        df = df[~df['DOMINIO'].isin(['', 'NAN', 'DOMINIO', 'PATENTE', 'UNIDAD'])].copy()
+        df['DOMINIO'] = df['DOMINIO'].str.replace(r'\s+', '', regex=True)
+        df = df[~df['DOMINIO'].isin(['', 'NAN', 'NONE', 'DOMINIO', 'PATENTE', 'UNIDAD'])].copy()
 
-        # Parsear monto — acepta $158.133,60 o 158133.60 o 158,133.60
-        df['TOTAL_GASTOS'] = (
-            df['TOTAL_GASTOS'].astype(str)
-            .str.replace(r'[\$\s]', '', regex=True)
-            .str.replace('.', '', regex=False)
-            .str.replace(',', '.', regex=False)
-        )
-        df['TOTAL_GASTOS'] = pd.to_numeric(df['TOTAL_GASTOS'], errors='coerce').fillna(0)
+        df['TOTAL_GASTOS'] = df['MONTO_RAW'].apply(_parse_monto)
         df = df[df['TOTAL_GASTOS'] > 0].copy()
 
-        # Parsear fecha
         df['FECHA'] = pd.to_datetime(df['FECHA_RAW'], errors='coerce', dayfirst=True)
         df['MES_PERIODO'] = df['FECHA'].dt.to_period('M')
 
-        # Filtrar sólo patentes LAD
         if patentes_lad is not None and len(patentes_lad) > 0:
             df = df[df['DOMINIO'].isin(patentes_lad)].copy()
 
         return df[['DOMINIO', 'FECHA', 'MES_PERIODO', 'TOTAL_GASTOS']].reset_index(drop=True)
-    except Exception as e:
+    except Exception:
         return pd.DataFrame()
 
 @st.cache_data(ttl=3600)
@@ -409,7 +479,6 @@ def obtener_precio_gasoil():
         r = requests.get("https://surtidores.com.ar/precios/", headers=headers, timeout=10)
         soup = BeautifulSoup(r.text, "html.parser")
         texto = soup.get_text(separator=" ")
-        import re
         matches = re.findall(r'[Gg]as[oi][il][^\d]*(\d{3,4})', texto[:8000])
         if matches:
             precio = float(matches[0])
@@ -460,7 +529,7 @@ def calcular_ier_chofer(df, df_vel=None, df_cond=None):
     ).reset_index()
     agg['MODELO'] = agg['DOMINIO'].apply(asignar_modelo)
 
-    if df_cond is not None and not df_cond.empty and 'DOMINIO' in df_cond.columns:
+    if df_cond is not None and not df_cond.empty and 'DOMINIO' in df_cond.columns and 'SCORE_CONDUCCION' in df_cond.columns:
         cond_agg = (df_cond.groupby('DOMINIO')['SCORE_CONDUCCION']
                     .mean().reset_index()
                     .rename(columns={'SCORE_CONDUCCION':'SCORE_COND'}))
@@ -538,7 +607,6 @@ with st.spinner('Cargando telemetría, conducción, gastos y carga...'):
 if df_raw.empty:
     st.warning('No se pudieron cargar datos.'); st.stop()
 
-# Determinar patentes LAD desde telemetría + fijas
 patentes_lad = set(df_raw['DOMINIO'].dropna().unique().tolist()) | PATENTES_LAD_FIJAS
 df_gastos_raw = cargar_gastos(patentes_lad=patentes_lad)
 
@@ -619,13 +687,16 @@ else:
 if not df_cond_raw.empty and 'MES_PERIODO' in df_cond_raw.columns:
     periodos_activos = df['MES_PERIODO'].dropna().unique()
     df_cond_filtrado = df_cond_raw[df_cond_raw['MES_PERIODO'].isin(periodos_activos)].copy()
+    if df_cond_filtrado.empty:
+        df_cond_filtrado = df_cond_raw.copy()
 else:
     df_cond_filtrado = df_cond_raw.copy()
 
-# Filtrar gastos por período activo del año seleccionado
 if not df_gastos_raw.empty and 'MES_PERIODO' in df_gastos_raw.columns:
     periodos_activos_anio = df['MES_PERIODO'].dropna().unique()
     df_gastos_anio = df_gastos_raw[df_gastos_raw['MES_PERIODO'].isin(periodos_activos_anio)].copy()
+    if df_gastos_anio.empty and 'FECHA' in df_gastos_raw.columns:
+        df_gastos_anio = df_gastos_raw[df_gastos_raw['FECHA'].dt.year == anio_sel].copy()
 else:
     df_gastos_anio = df_gastos_raw.copy()
 
@@ -703,7 +774,6 @@ if pg == "Dashboard Principal":
     n_unidades = df['DOMINIO'].nunique() if 'DOMINIO' in df.columns else 0
     ralenti_pct = round(ralenti_total/lts_total*100, 1) if lts_total > 0 else 0
 
-    # Gasto reparaciones: suma del año seleccionado, sólo patentes LAD
     gasto_total = df_gastos_anio['TOTAL_GASTOS'].sum() if not df_gastos_anio.empty else 0
     n_pat_gastos = df_gastos_anio['DOMINIO'].nunique() if not df_gastos_anio.empty else 0
 
@@ -783,7 +853,7 @@ if pg == "Dashboard Principal":
     # ── IER-CHOFER ──
     st.markdown(f'<div class="sec-title">IER-Chofer — Lo que controla el conductor — {anio_sel}</div>', unsafe_allow_html=True)
 
-    tiene_cond = not df_cond_filtrado.empty
+    tiene_cond = not df_cond_filtrado.empty and 'SCORE_CONDUCCION' in df_cond_filtrado.columns and df_cond_filtrado['SCORE_CONDUCCION'].notna().any()
     w_cond_txt = "40% L/100km · 40% Conducción · 20% Severidad velocidad" if tiene_cond else "60% L/100km · 40% Severidad velocidad (sin datos de conducción)"
 
     st.markdown(f"""<div class="ier-info-box">
