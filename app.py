@@ -1,7 +1,6 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-#  EXPRESO DIEMAR — Dashboard de Monitoreo de Flota v6
+#  EXPRESO DIEMAR — Dashboard de Monitoreo de Flota v7
 #  IER-CHOFER (L100 · Conducción · Velocidad)
-#  IER-UNIDAD  (L100 · $/km · kg/km)
 # ═══════════════════════════════════════════════════════════════════════════════
 import pandas as pd
 import streamlit as st
@@ -39,11 +38,14 @@ CARGA_URL = "http://bi.sistemaexpreso.com.ar/reporte_hojas.xlsx"
 
 # ── Conducción (CONDUCCION_MAESTRO en Sheets) ──
 COND_BASE = "https://docs.google.com/spreadsheets/d/1teVcN0ejyvGbjWwWOHTmZ8I-17xyGZ0d8hxJ7dwSKm0/pub?output=csv"
-URL_COND  = f"{COND_BASE}&gid=1146371669"   # hoja CONSOLIDADO
+URL_COND  = f"{COND_BASE}&gid=1146371669"
 
-# ── Gastos reparaciones ──
+# ── Gastos reparaciones (col A=fecha, B=patente, C=monto) ──
 GAST_BASE = "https://docs.google.com/spreadsheets/d/1u7cckay0IJ60bfoKk2OZo-TjCvTbH9O1wKxNFdSKDCQ/pub?output=csv"
 URL_GAST  = f"{GAST_BASE}&gid=33208473"
+
+# Todas las patentes LAD conocidas (telemetría + fijas)
+PATENTES_LAD_FIJAS = set(SWAY_PATENTES + SCANIA_PATENTES)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  PALETA CSS
@@ -122,42 +124,17 @@ section[data-testid="stMain"] { background: #f5f7fa; }
     padding:14px 18px; margin:10px 0; font-size:.85rem; color:#1e3a5f; line-height:1.6;
 }
 .ier-info-box b { color:#0f172a; }
-.ier-method-box {
-    background:#f0fdf4; border:1px solid #16a34a; border-radius:8px;
-    padding:14px 18px; margin:10px 0; font-size:.82rem; color:#14532d; line-height:1.7;
+.ier-chofer-card {
+    background:#ffffff; border-radius:10px; padding:16px 20px;
+    border-left:4px solid #2563eb; margin-bottom:10px;
+    box-shadow:0 1px 3px rgba(15,23,42,0.08);
 }
-.ier-gauge-wrap {
-    background:#ffffff; border-radius:10px; padding:18px 22px;
-    border-left:4px solid #1e3a5f; margin-bottom:12px; text-align:center;
-    box-shadow: 0 1px 3px rgba(15,23,42,0.08);
-}
-.ier-score-big { font-size:2.4rem; font-weight:900; line-height:1; }
-.ier-clasif    { font-size:.85rem; font-weight:700; margin-top:4px; color:#1e293b; }
-.ier-comp-row  {
-    display:flex; align-items:center; justify-content:space-between;
-    background:#f8fafc; border-radius:6px; padding:8px 14px; margin:4px 0;
-    font-size:.82rem; border:1px solid #e2e8f0;
-}
-.ier-comp-label { color:#475569; flex:1; }
-.ier-comp-val   { font-weight:700; color:#0f172a; }
-.ier-comp-bar-bg { width:90px; height:6px; background:#e2e8f0; border-radius:3px; margin:0 10px; overflow:hidden; }
-.ier-comp-bar    { height:6px; border-radius:3px; }
 .dm-header {
     background: #ffffff; border-radius: 10px; padding: 18px 24px; margin-bottom: 18px;
     box-shadow: 0 2px 6px rgba(30,58,95,0.08); border-left: 5px solid #1e3a5f;
 }
 .dm-header-title { font-size:1.5rem; font-weight:800; color:#1e3a5f; }
 .dm-header-sub   { font-size:.85rem; color:#64748b; margin-top:4px; }
-.ier-chofer-card {
-    background:#ffffff; border-radius:10px; padding:16px 20px;
-    border-left:4px solid #2563eb; margin-bottom:10px;
-    box-shadow:0 1px 3px rgba(15,23,42,0.08);
-}
-.ier-unidad-card {
-    background:#ffffff; border-radius:10px; padding:16px 20px;
-    border-left:4px solid #7c3aed; margin-bottom:10px;
-    box-shadow:0 1px 3px rgba(15,23,42,0.08);
-}
 </style>
 """
 
@@ -328,7 +305,6 @@ def cargar_conduccion():
     try:
         df = pd.read_csv(URL_COND, skiprows=4, header=0)
         df.columns = [str(c).strip().upper() for c in df.columns]
-        # Renombrar columnas según posición si vienen con nombres raros
         col_map = {}
         for c in df.columns:
             cu = c.upper()
@@ -341,7 +317,6 @@ def cargar_conduccion():
             elif 'FRENADO' in cu or 'FRENO' in cu:       col_map[c] = 'FRENADO_10'
             elif 'SCORE' in cu or 'CONDUCCION' in cu:    col_map[c] = 'SCORE_CONDUCCION'
         df = df.rename(columns=col_map)
-        # Mapeo por posición si fallan los nombres
         expected = ['MES','DOMINIO','MODELO','RALENTI_10','ACELERACION_10','ANTICIPACION_10','FRENADO_10','SCORE_CONDUCCION']
         if len(df.columns) >= 8:
             rename_pos = {df.columns[i]: expected[i] for i in range(min(8, len(df.columns)))}
@@ -349,11 +324,10 @@ def cargar_conduccion():
         if 'DOMINIO' not in df.columns: return pd.DataFrame()
         df['DOMINIO'] = df['DOMINIO'].astype(str).str.strip().str.upper()
         df = df[~df['DOMINIO'].isin(['', 'NAN', 'DOMINIO', 'PATENTE'])].copy()
-        # MES: puede venir como serial Excel o YYYY-MM
         def parse_mes(v):
             try:
                 v = str(v).strip()
-                if v.isdigit():  # serial Excel
+                if v.isdigit():
                     return pd.Timestamp('1899-12-30') + pd.Timedelta(days=int(v))
                 return pd.to_datetime(v, errors='coerce')
             except: return pd.NaT
@@ -366,26 +340,27 @@ def cargar_conduccion():
                     df[col].astype(str).str.replace(',','.', regex=False), errors='coerce'
                 )
         return df.reset_index(drop=True)
-    except Exception as e:
+    except:
         return pd.DataFrame()
 
 @st.cache_data(ttl=1800)
-def cargar_gastos():
-    """Lee GASTOS REPARACIONES: columnas PERIODO · PATENTE · TOTAL GASTOS."""
+def cargar_gastos(patentes_lad=None):
+    """
+    Lee hoja de gastos de reparaciones.
+    Col A = fecha, Col B = patente, Col C = monto.
+    Filtra sólo patentes LAD.
+    """
     try:
-        df = pd.read_csv(URL_GAST)
-        df.columns = [str(c).strip().upper() for c in df.columns]
-        col_map = {}
-        for c in df.columns:
-            cu = c.upper()
-            if   'PERIOD' in cu or 'FECHA' in cu: col_map[c] = 'PERIODO'
-            elif 'PATENT' in cu or 'UNIDAD' in cu: col_map[c] = 'DOMINIO'
-            elif 'GASTO' in cu or 'TOTAL' in cu:   col_map[c] = 'TOTAL_GASTOS'
-        df = df.rename(columns=col_map)
-        if 'DOMINIO' not in df.columns or 'TOTAL_GASTOS' not in df.columns:
-            return pd.DataFrame()
+        df = pd.read_csv(URL_GAST, header=0)
+        # Tomar las primeras 3 columnas sin importar el nombre
+        df = df.iloc[:, :3].copy()
+        df.columns = ['FECHA_RAW', 'DOMINIO', 'TOTAL_GASTOS']
+
+        # Limpiar patente
         df['DOMINIO'] = df['DOMINIO'].astype(str).str.strip().str.upper()
-        # Parsear formato $158.133,60
+        df = df[~df['DOMINIO'].isin(['', 'NAN', 'DOMINIO', 'PATENTE', 'UNIDAD'])].copy()
+
+        # Parsear monto — acepta $158.133,60 o 158133.60 o 158,133.60
         df['TOTAL_GASTOS'] = (
             df['TOTAL_GASTOS'].astype(str)
             .str.replace(r'[\$\s]', '', regex=True)
@@ -393,11 +368,17 @@ def cargar_gastos():
             .str.replace(',', '.', regex=False)
         )
         df['TOTAL_GASTOS'] = pd.to_numeric(df['TOTAL_GASTOS'], errors='coerce').fillna(0)
-        # Parsear período
-        if 'PERIODO' in df.columns:
-            df['MES_PERIODO'] = pd.to_datetime(df['PERIODO'], format='%m/%Y', errors='coerce').dt.to_period('M')
-        df = df[df['DOMINIO'].notna() & (df['DOMINIO'] != '')].copy()
-        return df[['DOMINIO','MES_PERIODO','TOTAL_GASTOS']].reset_index(drop=True)
+        df = df[df['TOTAL_GASTOS'] > 0].copy()
+
+        # Parsear fecha
+        df['FECHA'] = pd.to_datetime(df['FECHA_RAW'], errors='coerce', dayfirst=True)
+        df['MES_PERIODO'] = df['FECHA'].dt.to_period('M')
+
+        # Filtrar sólo patentes LAD
+        if patentes_lad is not None and len(patentes_lad) > 0:
+            df = df[df['DOMINIO'].isin(patentes_lad)].copy()
+
+        return df[['DOMINIO', 'FECHA', 'MES_PERIODO', 'TOTAL_GASTOS']].reset_index(drop=True)
     except Exception as e:
         return pd.DataFrame()
 
@@ -468,11 +449,6 @@ def clasif_ier(v):
 #  IER-CHOFER  (40% L100 · 40% Conducción · 20% Velocidad)
 # ═══════════════════════════════════════════════════════════════════════════════
 def calcular_ier_chofer(df, df_vel=None, df_cond=None):
-    """
-    Evalúa lo que controla el chofer.
-    40% L/100km · 40% Score Conducción (z-score por modelo) · 20% Severidad velocidad
-    Normalización: z-score + tanh por modelo.
-    """
     if df.empty or 'DOMINIO' not in df.columns: return pd.DataFrame()
     df_c = df[df['L100KM'] > 0].copy()
     if df_c.empty: return pd.DataFrame()
@@ -484,7 +460,6 @@ def calcular_ier_chofer(df, df_vel=None, df_cond=None):
     ).reset_index()
     agg['MODELO'] = agg['DOMINIO'].apply(asignar_modelo)
 
-    # ── Score Conducción ──
     if df_cond is not None and not df_cond.empty and 'DOMINIO' in df_cond.columns:
         cond_agg = (df_cond.groupby('DOMINIO')['SCORE_CONDUCCION']
                     .mean().reset_index()
@@ -493,7 +468,6 @@ def calcular_ier_chofer(df, df_vel=None, df_cond=None):
     else:
         agg['SCORE_COND'] = np.nan
 
-    # ── Severidad velocidad ──
     if df_vel is not None and not df_vel.empty and 'DOMINIO' in df_vel.columns:
         vel_agg = df_vel.groupby('DOMINIO').agg(
             EXCESOS=('DOMINIO','count'),
@@ -505,29 +479,24 @@ def calcular_ier_chofer(df, df_vel=None, df_cond=None):
     agg['SEVERIDAD'] = agg.get('SEVERIDAD', pd.Series(0.0, index=agg.index)).fillna(0)
     agg['VEL_MAX']   = agg.get('VEL_MAX',   pd.Series(0.0, index=agg.index)).fillna(0)
 
-    # ── Z-score por modelo ──
     for col in ['SC_L100','SC_COND','SC_VEL']: agg[col] = 1.0
 
     for modelo in agg['MODELO'].unique():
         mask = agg['MODELO'] == modelo
         idx  = agg.index[mask]
         if mask.sum() == 0: continue
-        # L100KM: menor = mejor
         agg.loc[idx,'SC_L100'] = calcular_score_zscore(
             agg.loc[idx,'L100KM'], higher_is_better=False, k=0.4, min_sigma_pct=0.05).values
-        # Score conducción: mayor = mejor (solo si hay datos)
         cond_vals = agg.loc[idx,'SCORE_COND']
         if cond_vals.notna().sum() > 1:
             agg.loc[idx,'SC_COND'] = calcular_score_zscore(
                 cond_vals, higher_is_better=True, k=0.4, min_sigma_pct=0.05).values
         else:
-            agg.loc[idx,'SC_COND'] = 1.0  # neutro si no hay dato
-        # Velocidad: menor severidad = mejor
+            agg.loc[idx,'SC_COND'] = 1.0
         sev_log = np.log1p(agg.loc[idx,'SEVERIDAD'].astype(float))
         agg.loc[idx,'SC_VEL'] = calcular_score_zscore(
             sev_log, higher_is_better=False, k=0.4, min_sigma_pct=0.30).values
 
-    # ── IER-Chofer ──
     tiene_cond = agg['SCORE_COND'].notna().any()
     if tiene_cond:
         agg['IER_CHOFER'] = (
@@ -536,13 +505,11 @@ def calcular_ier_chofer(df, df_vel=None, df_cond=None):
             0.20 * agg['SC_VEL']
         ).mul(100).round(1)
     else:
-        # Sin datos de conducción: redistribuir pesos
         agg['IER_CHOFER'] = (
             0.60 * agg['SC_L100'] +
             0.40 * agg['SC_VEL']
         ).mul(100).round(1)
 
-    # Recentrar en 100 por modelo
     for modelo in agg['MODELO'].unique():
         mask = agg['MODELO'] == modelo
         if mask.sum() > 1:
@@ -550,128 +517,13 @@ def calcular_ier_chofer(df, df_vel=None, df_cond=None):
             if not np.isnan(grp_mean) and grp_mean > 0:
                 agg.loc[mask,'IER_CHOFER'] = (agg.loc[mask,'IER_CHOFER'] - grp_mean + 100).round(1)
 
-    agg['IER_CHOFER']       = agg['IER_CHOFER'].fillna(100.0)
-    agg['CLASIF_CHOFER']    = agg['IER_CHOFER'].apply(clasif_ier)
-    agg['TIENE_COND']       = tiene_cond
+    agg['IER_CHOFER']    = agg['IER_CHOFER'].fillna(100.0)
+    agg['CLASIF_CHOFER'] = agg['IER_CHOFER'].apply(clasif_ier)
+    agg['TIENE_COND']    = tiene_cond
 
     return agg[['DOMINIO','MODELO','IER_CHOFER','CLASIF_CHOFER',
                  'L100KM','SCORE_COND','EXCESOS','SEVERIDAD','VEL_MAX',
                  'SC_L100','SC_COND','SC_VEL','TIENE_COND']].sort_values('IER_CHOFER', ascending=False).reset_index(drop=True)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  IER-UNIDAD  (50% L100 · 30% $/km · 20% kg/km)
-# ═══════════════════════════════════════════════════════════════════════════════
-def calcular_ier_unidad(df, df_gastos=None, df_carga=None):
-    """
-    Evalúa el vehículo/operación.
-    50% L/100km · 30% $/km mantenimiento · 20% kg/km carga
-    Normalización: z-score + tanh por modelo.
-    """
-    if df.empty or 'DOMINIO' not in df.columns: return pd.DataFrame()
-    df_c = df[df['L100KM'] > 0].copy()
-    if df_c.empty: return pd.DataFrame()
-
-    agg = df_c.groupby('DOMINIO').agg(
-        L100KM=('L100KM','mean'),
-        KM=('KM','sum'),
-        LITROS=('LITROS','sum')
-    ).reset_index()
-    agg['MODELO'] = agg['DOMINIO'].apply(asignar_modelo)
-
-    # ── $/km desde GASTOS ──
-    if df_gastos is not None and not df_gastos.empty:
-        # Filtrar por período activo si hay columna MES_PERIODO
-        if 'MES_PERIODO' in df.columns:
-            periodos_activos = df['MES_PERIODO'].dropna().unique() if 'MES_PERIODO' in df.columns else []
-            if len(periodos_activos) > 0 and 'MES_PERIODO' in df_gastos.columns:
-                gast_filt = df_gastos[df_gastos['MES_PERIODO'].isin(periodos_activos)]
-            else:
-                gast_filt = df_gastos
-        else:
-            gast_filt = df_gastos
-        gast_agg = gast_filt.groupby('DOMINIO')['TOTAL_GASTOS'].sum().reset_index()
-        agg = agg.merge(gast_agg, on='DOMINIO', how='left')
-        agg['TOTAL_GASTOS'] = agg['TOTAL_GASTOS'].fillna(0)
-        agg['GASTO_X_KM']   = np.where(
-            (agg['KM'] > 0) & (agg['TOTAL_GASTOS'] > 0),
-            agg['TOTAL_GASTOS'] / agg['KM'], np.nan
-        )
-    else:
-        agg['TOTAL_GASTOS'] = 0.0
-        agg['GASTO_X_KM']   = np.nan
-
-    # ── kg/km desde carga ──
-    if df_carga is not None and not df_carga.empty:
-        if 'MES_PERIODO' in df.columns:
-            periodos_activos = df['MES_PERIODO'].dropna().unique()
-            carga_filt = df_carga[df_carga['MES'].isin(periodos_activos)] if len(periodos_activos) > 0 else df_carga
-        else:
-            carga_filt = df_carga
-        carga_agg = carga_filt.groupby('DOMINIO')['PESO_TON'].sum().reset_index()
-        agg = agg.merge(carga_agg, on='DOMINIO', how='left')
-        agg['PESO_TON'] = agg['PESO_TON'].fillna(0)
-        agg['KG_KM']    = np.where(
-            (agg['KM'] > 0) & (agg['PESO_TON'] > 0),
-            (agg['PESO_TON'] * 1000) / agg['KM'], np.nan
-        )
-    else:
-        agg['PESO_TON'] = 0.0
-        agg['KG_KM']    = np.nan
-
-    # ── Z-score por modelo ──
-    for col in ['SC_L100','SC_GASTO','SC_CARGA']: agg[col] = 1.0
-
-    for modelo in agg['MODELO'].unique():
-        mask = agg['MODELO'] == modelo
-        idx  = agg.index[mask]
-        if mask.sum() == 0: continue
-        agg.loc[idx,'SC_L100'] = calcular_score_zscore(
-            agg.loc[idx,'L100KM'], higher_is_better=False, k=0.4, min_sigma_pct=0.05).values
-        gasto_vals = agg.loc[idx,'GASTO_X_KM']
-        if gasto_vals.notna().sum() > 1:
-            agg.loc[idx,'SC_GASTO'] = calcular_score_zscore(
-                gasto_vals, higher_is_better=False, k=0.4, min_sigma_pct=0.10).values
-        carga_vals = agg.loc[idx,'KG_KM']
-        if carga_vals.notna().sum() > 1:
-            agg.loc[idx,'SC_CARGA'] = calcular_score_zscore(
-                carga_vals, higher_is_better=True, k=0.4, min_sigma_pct=0.10).values
-
-    tiene_gastos = agg['GASTO_X_KM'].notna().any()
-    tiene_carga  = agg['KG_KM'].notna().any()
-
-    # Pesos adaptativos
-    w_l100  = 0.50
-    w_gasto = 0.30 if tiene_gastos else 0.0
-    w_carga = 0.20 if tiene_carga  else 0.0
-    total_w = w_l100 + w_gasto + w_carga
-    if total_w > 0:
-        w_l100 /= total_w; w_gasto /= total_w; w_carga /= total_w
-
-    agg['IER_UNIDAD'] = (
-        w_l100  * agg['SC_L100']  +
-        w_gasto * agg['SC_GASTO'] +
-        w_carga * agg['SC_CARGA']
-    ).mul(100).round(1)
-
-    for modelo in agg['MODELO'].unique():
-        mask = agg['MODELO'] == modelo
-        if mask.sum() > 1:
-            grp_mean = agg.loc[mask,'IER_UNIDAD'].mean()
-            if not np.isnan(grp_mean) and grp_mean > 0:
-                agg.loc[mask,'IER_UNIDAD'] = (agg.loc[mask,'IER_UNIDAD'] - grp_mean + 100).round(1)
-
-    agg['IER_UNIDAD']    = agg['IER_UNIDAD'].fillna(100.0)
-    agg['CLASIF_UNIDAD'] = agg['IER_UNIDAD'].apply(clasif_ier)
-    agg['TIENE_GASTOS']  = tiene_gastos
-    agg['TIENE_CARGA']   = tiene_carga
-    agg['W_L100']        = round(w_l100*100)
-    agg['W_GASTO']       = round(w_gasto*100)
-    agg['W_CARGA']       = round(w_carga*100)
-
-    return agg[['DOMINIO','MODELO','IER_UNIDAD','CLASIF_UNIDAD',
-                 'L100KM','GASTO_X_KM','TOTAL_GASTOS','KG_KM','PESO_TON',
-                 'SC_L100','SC_GASTO','SC_CARGA',
-                 'TIENE_GASTOS','TIENE_CARGA','W_L100','W_GASTO','W_CARGA']].sort_values('IER_UNIDAD', ascending=False).reset_index(drop=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  CARGA INICIAL
@@ -682,10 +534,13 @@ with st.spinner('Cargando telemetría, conducción, gastos y carga...'):
     df_carga_raw     = cargar_carga()
     df_viajes_raw    = cargar_viajes_todos()
     df_cond_raw      = cargar_conduccion()
-    df_gastos_raw    = cargar_gastos()
 
 if df_raw.empty:
     st.warning('No se pudieron cargar datos.'); st.stop()
+
+# Determinar patentes LAD desde telemetría + fijas
+patentes_lad = set(df_raw['DOMINIO'].dropna().unique().tolist()) | PATENTES_LAD_FIJAS
+df_gastos_raw = cargar_gastos(patentes_lad=patentes_lad)
 
 precio_gasoil, precio_fuente = obtener_precio_gasoil()
 st.markdown(DARK_CSS, unsafe_allow_html=True)
@@ -761,16 +616,20 @@ if not df.empty and not df_vel_anio.empty and 'FECHA' in df_vel_anio.columns:
 else:
     df_vel_filtrado = df_vel_anio.copy()
 
-# Filtrar conducción por período activo
 if not df_cond_raw.empty and 'MES_PERIODO' in df_cond_raw.columns:
     periodos_activos = df['MES_PERIODO'].dropna().unique()
     df_cond_filtrado = df_cond_raw[df_cond_raw['MES_PERIODO'].isin(periodos_activos)].copy()
 else:
     df_cond_filtrado = df_cond_raw.copy()
 
-# Calcular ambos IER
+# Filtrar gastos por período activo del año seleccionado
+if not df_gastos_raw.empty and 'MES_PERIODO' in df_gastos_raw.columns:
+    periodos_activos_anio = df['MES_PERIODO'].dropna().unique()
+    df_gastos_anio = df_gastos_raw[df_gastos_raw['MES_PERIODO'].isin(periodos_activos_anio)].copy()
+else:
+    df_gastos_anio = df_gastos_raw.copy()
+
 df_ier_chofer = calcular_ier_chofer(df, df_vel_filtrado, df_cond_filtrado)
-df_ier_unidad = calcular_ier_unidad(df, df_gastos_raw, df_carga_raw)
 
 total_excesos  = len(df_vel_filtrado) if not df_vel_filtrado.empty else 0
 vel_max_global = df_vel_filtrado['VELOCIDAD'].max() if not df_vel_filtrado.empty and 'VELOCIDAD' in df_vel_filtrado.columns else 0
@@ -791,7 +650,7 @@ def ier_bar_color(v):
     elif v >= 85: return '#ea580c'
     else: return '#dc2626'
 
-def render_ier_chart(df_ier, col_ier, col_clasif, height=None, title_suffix=''):
+def render_ier_chart(df_ier, col_ier, col_clasif, height=None):
     if df_ier.empty: return
     df_sorted = df_ier.sort_values(['MODELO', col_ier], ascending=[True, False])
     fig = go.Figure()
@@ -815,7 +674,7 @@ def render_ier_chart(df_ier, col_ier, col_clasif, height=None, title_suffix=''):
         paper_bgcolor=PAPER_BG, plot_bgcolor=PLOT_BG, font=dict(color=FONT_COL),
         barmode='overlay',
         xaxis=dict(gridcolor=GRID_COL, tickfont=dict(color=AXIS_COL),
-                   title=dict(text=f'IER (100 = promedio de su modelo)', font=dict(color=AXIS_COL)),
+                   title=dict(text='IER (100 = promedio de su modelo)', font=dict(color=AXIS_COL)),
                    range=[ier_min, ier_max]),
         yaxis=dict(gridcolor=GRID_COL, tickfont=dict(color=AXIS_COL, size=10),
                    categoryorder='array', categoryarray=df_sorted['DOMINIO'].tolist()),
@@ -843,7 +702,10 @@ if pg == "Dashboard Principal":
     costo_est  = lts_total * precio_gasoil
     n_unidades = df['DOMINIO'].nunique() if 'DOMINIO' in df.columns else 0
     ralenti_pct = round(ralenti_total/lts_total*100, 1) if lts_total > 0 else 0
-    gasto_total = df_gastos_raw['TOTAL_GASTOS'].sum() if not df_gastos_raw.empty else 0
+
+    # Gasto reparaciones: suma del año seleccionado, sólo patentes LAD
+    gasto_total = df_gastos_anio['TOTAL_GASTOS'].sum() if not df_gastos_anio.empty else 0
+    n_pat_gastos = df_gastos_anio['DOMINIO'].nunique() if not df_gastos_anio.empty else 0
 
     if len(meses_df) >= 2:
         delta_l100 = meses_df['L100'].iloc[-1] - meses_df['L100'].iloc[-2]
@@ -858,7 +720,7 @@ if pg == "Dashboard Principal":
     kpi(k3, delta_col, 'L/100km flota', f'{l100_prom:.2f}', delta_txt)
     k4, k5, k6 = st.columns(3)
     kpi(k4, 'kpi-amber', 'Costo combustible est.', f'${costo_est/1e6:.1f}M', f'@ ${precio_gasoil:,.0f}/L')
-    kpi(k5, 'kpi-purple', 'Gasto reparaciones', f'${gasto_total/1e6:.1f}M', f'período {anio_sel}')
+    kpi(k5, 'kpi-purple', 'Gasto reparaciones', f'${gasto_total/1e6:.2f}M', f'{n_pat_gastos} patentes LAD · {anio_sel}')
     _ral_sub = f'{ralenti_total:,.0f} L · {ralenti_delta_txt}' if ralenti_delta_txt else f'{ralenti_total:,.0f} L en ralentí'
     kpi(k6, 'kpi-amber', '% Ralentí', f'{ralenti_pct:.1f}%', _ral_sub)
 
@@ -918,9 +780,7 @@ if pg == "Dashboard Principal":
 
     st.divider()
 
-    # ══════════════════════════════════════════════════
-    #  IER-CHOFER
-    # ══════════════════════════════════════════════════
+    # ── IER-CHOFER ──
     st.markdown(f'<div class="sec-title">IER-Chofer — Lo que controla el conductor — {anio_sel}</div>', unsafe_allow_html=True)
 
     tiene_cond = not df_cond_filtrado.empty
@@ -958,56 +818,6 @@ if pg == "Dashboard Principal":
             st.dataframe(show, use_container_width=True, hide_index=True)
     else:
         st.info('Sin datos suficientes para IER-Chofer.')
-
-    st.divider()
-
-    # ══════════════════════════════════════════════════
-    #  IER-UNIDAD
-    # ══════════════════════════════════════════════════
-    st.markdown(f'<div class="sec-title">IER-Unidad — Productividad del vehículo — {anio_sel}</div>', unsafe_allow_html=True)
-
-    if not df_ier_unidad.empty:
-        w_l100  = int(df_ier_unidad['W_L100'].iloc[0])
-        w_gasto = int(df_ier_unidad['W_GASTO'].iloc[0])
-        w_carga = int(df_ier_unidad['W_CARGA'].iloc[0])
-        tiene_g = df_ier_unidad['TIENE_GASTOS'].iloc[0]
-        tiene_c = df_ier_unidad['TIENE_CARGA'].iloc[0]
-
-        pond_txt = (f"<b>{w_l100}%</b> L/100km &nbsp;·&nbsp; "
-                    f"<b>{w_gasto}%</b> $/km mantenimiento {'OK' if tiene_g else '(sin datos)'} &nbsp;·&nbsp; "
-                    f"<b>{w_carga}%</b> kg/km carga {'OK' if tiene_c else '(sin datos)'}")
-
-        st.markdown(f"""<div class="ier-info-box" style="border-color:#7c3aed;">
-        <b>¿Qué mide?</b> Eficiencia del vehículo y la operación — independiente del chofer.<br>
-        <b>Ponderación adaptativa:</b> {pond_txt}<br>
-        <b>$/km:</b> gasto de reparaciones del período ÷ km recorridos · <b>kg/km:</b> peso entregado ÷ km recorridos<br>
-        <b>Escala:</b> 🟢 Eficiente ≥105 · 🟡 Normal 95–105 · 🟠 Atención 85–95 · 🔴 Crítico &lt;85
-        </div>""", unsafe_allow_html=True)
-
-        cats2 = df_ier_unidad['CLASIF_UNIDAD'].value_counts()
-        iu1, iu2, iu3, iu4 = st.columns(4)
-        iu1.metric('🟢 Eficiente', int(cats2.get('🟢 Eficiente',0)), 'IER ≥ 105')
-        iu2.metric('🟡 Normal',    int(cats2.get('🟡 Normal',0)),    'IER 95–105')
-        iu3.metric('🟠 Atención',  int(cats2.get('🟠 Atención',0)),  'IER 85–95')
-        iu4.metric('🔴 Crítico',   int(cats2.get('🔴 Crítico',0)),   'IER < 85')
-        render_ier_chart(df_ier_unidad, 'IER_UNIDAD', 'CLASIF_UNIDAD')
-        st.caption('Verde = mejor que su modelo · Rojo = peor · Línea naranja = base 100')
-
-        with st.expander('Tabla detallada IER-Unidad'):
-            show2 = df_ier_unidad[['DOMINIO','MODELO','IER_UNIDAD','CLASIF_UNIDAD',
-                                    'L100KM','GASTO_X_KM','TOTAL_GASTOS','KG_KM','PESO_TON',
-                                    'SC_L100','SC_GASTO','SC_CARGA']].copy()
-            show2.columns = ['Patente','Modelo','IER-Unidad','Clasificación',
-                             'L/100km','$/km mantenimiento','Gasto total ($)','kg/km carga','Peso total (ton)',
-                             f'S.L100 ({w_l100}%)',f'S.Gasto ({w_gasto}%)',f'S.Carga ({w_carga}%)']
-            show2['L/100km']          = show2['L/100km'].round(2)
-            show2['$/km mantenimiento'] = show2['$/km mantenimiento'].apply(lambda x: f'${x:,.0f}' if pd.notna(x) and x>0 else '—')
-            show2['Gasto total ($)']  = show2['Gasto total ($)'].apply(lambda x: f'${x:,.0f}' if x>0 else '—')
-            show2['kg/km carga']      = show2['kg/km carga'].apply(lambda x: f'{x:.1f}' if pd.notna(x) and x>0 else '—')
-            show2['Peso total (ton)'] = show2['Peso total (ton)'].apply(lambda x: f'{x:.1f}' if x>0 else '—')
-            st.dataframe(show2, use_container_width=True, hide_index=True)
-    else:
-        st.info('Sin datos suficientes para IER-Unidad.')
 
     # ── Velocidades ──
     if not df_vel_filtrado.empty and 'DOMINIO' in df_vel_filtrado.columns:
@@ -1124,7 +934,6 @@ elif pg == "Modelo Predictivo":
             height=450, margin=dict(l=10,r=10,t=50,b=60), hovermode='x unified')
         st.plotly_chart(fig, use_container_width=True)
 
-        # ── Alerta desvío ──
         st.divider()
         st.markdown('<div class="sec-title">Alerta de Desvío — Predicción vs. Real</div>', unsafe_allow_html=True)
         if len(hist) >= 3:
@@ -1157,7 +966,6 @@ elif pg == "Modelo Predictivo":
                 else:
                     st.markdown(f'<div class="alert-ok"><b>Sin desvío — {mes_elegido_str}</b><br>Real: <b>{valor_real:.2f}</b> | Pred: <b>{pred_mes:.2f}</b> | Desvío: <b>{desvio:+.2f} ({desvio_pct:+.1f}%)</b> — dentro del intervalo (±{umbral:.2f})</div>', unsafe_allow_html=True)
 
-        # ── What-If ──
         st.divider()
         st.markdown('<div class="sec-title">Simulador What-If</div>', unsafe_allow_html=True)
         delta_precio_pct = st.slider('Variación precio combustible (%)', min_value=-30, max_value=50, value=0, step=1)
@@ -1191,7 +999,7 @@ elif pg == "Análisis por Patente":
     with col_title3:
         st.markdown(f"""<div class='dm-header'>
         <div class='dm-header-title'>Análisis por Patente — {anio_sel}</div>
-        <div class='dm-header-sub'>Consumo · IER-Chofer · IER-Unidad · Excesos velocidad</div>
+        <div class='dm-header-sub'>Consumo · IER-Chofer · Excesos velocidad</div>
         </div>""", unsafe_allow_html=True)
 
     if df.empty or 'DOMINIO' not in df.columns: st.warning('Sin datos.'); st.stop()
@@ -1206,8 +1014,6 @@ elif pg == "Análisis por Patente":
 
     if not df_ier_chofer.empty:
         resumen = resumen.merge(df_ier_chofer[['DOMINIO','IER_CHOFER','CLASIF_CHOFER','SCORE_COND','EXCESOS','VEL_MAX']], on='DOMINIO', how='left')
-    if not df_ier_unidad.empty:
-        resumen = resumen.merge(df_ier_unidad[['DOMINIO','IER_UNIDAD','CLASIF_UNIDAD','GASTO_X_KM','KG_KM']], on='DOMINIO', how='left')
 
     if resumen.empty: st.warning('Sin datos suficientes.'); st.stop()
 
@@ -1273,32 +1079,17 @@ elif pg == "Análisis por Patente":
             pk4.metric('L/100km promedio', f'{l100_prom_pat:.2f}')
             pk5.metric('Litros totales', f'{df_pat_mes["LITROS"].sum():,.0f}')
 
-            # IER ambos
             ier_c_row = df_ier_chofer[df_ier_chofer['DOMINIO']==pat_sel].iloc[0] if not df_ier_chofer.empty and pat_sel in df_ier_chofer['DOMINIO'].values else None
-            ier_u_row = df_ier_unidad[df_ier_unidad['DOMINIO']==pat_sel].iloc[0] if not df_ier_unidad.empty and pat_sel in df_ier_unidad['DOMINIO'].values else None
-
-            if ier_c_row is not None or ier_u_row is not None:
-                st.markdown('<div class="sec-title">Índices de Eficiencia</div>', unsafe_allow_html=True)
-                ia1, ia2 = st.columns(2)
-                if ier_c_row is not None:
-                    with ia1:
-                        vc = ier_c_row['IER_CHOFER']
-                        sc = '#16a34a' if vc>=105 else ('#d97706' if vc>=95 else ('#ea580c' if vc>=85 else '#dc2626'))
-                        st.markdown(f'<div class="ier-chofer-card"><div class="kpi-label">IER-Chofer</div><div class="ier-score-big" style="color:{sc};">{vc:.1f}</div><div class="ier-clasif">{ier_c_row["CLASIF_CHOFER"]}</div></div>', unsafe_allow_html=True)
-                        st.metric('L/100km', f'{ier_c_row["L100KM"]:.2f}')
-                        cond_v = ier_c_row.get('SCORE_COND')
-                        st.metric('Score Conducción', f'{cond_v:.1f}/10' if pd.notna(cond_v) else 'Sin datos')
-                        st.metric(f'Excesos >{LIMITE_VELOCIDAD}km/h', f'{int(ier_c_row["EXCESOS"])} eventos')
-                if ier_u_row is not None:
-                    with ia2:
-                        vu = ier_u_row['IER_UNIDAD']
-                        su = '#16a34a' if vu>=105 else ('#d97706' if vu>=95 else ('#ea580c' if vu>=85 else '#dc2626'))
-                        st.markdown(f'<div class="ier-unidad-card"><div class="kpi-label">IER-Unidad</div><div class="ier-score-big" style="color:{su};">{vu:.1f}</div><div class="ier-clasif">{ier_u_row["CLASIF_UNIDAD"]}</div></div>', unsafe_allow_html=True)
-                        gxkm = ier_u_row.get('GASTO_X_KM')
-                        kgkm = ier_u_row.get('KG_KM')
-                        st.metric('$/km mantenimiento', f'${gxkm:,.0f}' if pd.notna(gxkm) and gxkm>0 else 'Sin datos')
-                        st.metric('kg/km carga', f'{kgkm:.1f}' if pd.notna(kgkm) and kgkm>0 else 'Sin datos')
-                        st.metric('Gasto total período', f'${ier_u_row["TOTAL_GASTOS"]:,.0f}' if ier_u_row["TOTAL_GASTOS"]>0 else 'Sin datos')
+            if ier_c_row is not None:
+                st.markdown('<div class="sec-title">IER-Chofer</div>', unsafe_allow_html=True)
+                vc = ier_c_row['IER_CHOFER']
+                sc = '#16a34a' if vc>=105 else ('#d97706' if vc>=95 else ('#ea580c' if vc>=85 else '#dc2626'))
+                ia1, ia2, ia3, ia4 = st.columns(4)
+                ia1.markdown(f'<div class="ier-chofer-card"><div class="kpi-label">IER-Chofer</div><div style="font-size:2.4rem;font-weight:900;color:{sc};">{vc:.1f}</div><div style="font-size:.85rem;font-weight:700;">{ier_c_row["CLASIF_CHOFER"]}</div></div>', unsafe_allow_html=True)
+                ia2.metric('L/100km', f'{ier_c_row["L100KM"]:.2f}')
+                cond_v = ier_c_row.get('SCORE_COND')
+                ia3.metric('Score Conducción', f'{cond_v:.1f}/10' if pd.notna(cond_v) else 'Sin datos')
+                ia4.metric(f'Excesos >{LIMITE_VELOCIDAD}km/h', f'{int(ier_c_row["EXCESOS"])} eventos')
 
             fig_pat = go.Figure()
             fig_pat.add_trace(go.Bar(x=df_pat_mes['MES_STR'], y=df_pat_mes['LITROS'], name='Litros',
@@ -1326,22 +1117,17 @@ elif pg == "Análisis por Patente":
     cols_extra = []
     names_extra = []
     for c,n in [('IER_CHOFER','IER-Chofer'),('CLASIF_CHOFER','Clasif. Chofer'),
-                ('IER_UNIDAD','IER-Unidad'),('CLASIF_UNIDAD','Clasif. Unidad'),
-                ('SCORE_COND','Score Cond. (0-10)'),('GASTO_X_KM','$/km mant.'),('KG_KM','kg/km')]:
+                ('SCORE_COND','Score Cond. (0-10)'),('EXCESOS',f'Excesos >{LIMITE_VELOCIDAD}km/h')]:
         if c in resumen.columns: cols_extra.append(c); names_extra.append(n)
     resumen_show = resumen[cols_base + cols_extra].copy()
     resumen_show.columns = names_base + names_extra
     resumen_show['Litros Total'] = resumen_show['Litros Total'].apply(lambda x: f'{x:,.0f}')
     resumen_show['KM Total']     = resumen_show['KM Total'].apply(lambda x: f'{x:,.0f}')
-    if '$/km mant.' in resumen_show.columns:
-        resumen_show['$/km mant.'] = resumen_show['$/km mant.'].apply(lambda x: f'${x:,.0f}' if pd.notna(x) and x>0 else '—')
-    if 'kg/km' in resumen_show.columns:
-        resumen_show['kg/km'] = resumen_show['kg/km'].apply(lambda x: f'{x:.1f}' if pd.notna(x) and x>0 else '—')
     st.dataframe(resumen_show, use_container_width=True, hide_index=True)
     st.caption(f'Datos {anio_sel} · Google Sheets Expreso Diemar · Actualización cada 10 min')
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  PÁGINA 4 — DATOS OPERATIVOS (sin cambios respecto a v5)
+#  PÁGINA 4 — DATOS OPERATIVOS
 # ═══════════════════════════════════════════════════════════════════════════════
 elif pg == "Datos Operativos":
     col_logo4, col_title4 = st.columns([1, 5])
@@ -1349,7 +1135,7 @@ elif pg == "Datos Operativos":
     with col_title4:
         st.markdown(f"""<div class='dm-header'>
         <div class='dm-header-title'>Datos Operativos — {anio_sel}</div>
-        <div class='dm-header-sub'>Peso entregado · kg/km · $/km · Productividad</div>
+        <div class='dm-header-sub'>Peso entregado · kg/km · Productividad</div>
         </div>""", unsafe_allow_html=True)
 
     if df_carga_raw is None or df_carga_raw.empty:
@@ -1379,7 +1165,6 @@ elif pg == "Datos Operativos":
     kpi2(ck3,'kpi-green','Prom. por Patente',f'{peso_prom_pat:,.1f}','toneladas anuales')
     kpi2(ck4,'kpi-amber','Meses con datos',f'{meses_con_carga}',f'de {anio_sel}')
 
-    # Matriz L/100km vs kg/km (igual que v5)
     st.divider()
     st.markdown(f'<div class="sec-title">Diagnóstico — L/100km vs kg/km — {anio_sel}</div>', unsafe_allow_html=True)
     _km_pat   = df[df['KM']>0].groupby('DOMINIO')['KM'].sum().reset_index()
@@ -1388,15 +1173,6 @@ elif pg == "Datos Operativos":
     _mat = _km_pat.merge(_l100_pat, on='DOMINIO').merge(_tons_pat, on='DOMINIO', how='inner')
     _mat['KG_KM']  = (_mat['PESO_TON']*1000/_mat['KM']).round(2)
     _mat['MODELO'] = _mat['DOMINIO'].apply(asignar_modelo)
-
-    # Agregar gastos $/km si disponible
-    if not df_gastos_raw.empty:
-        _gast_pat = df_gastos_raw.groupby('DOMINIO')['TOTAL_GASTOS'].sum().reset_index()
-        _mat = _mat.merge(_gast_pat, on='DOMINIO', how='left')
-        _mat['TOTAL_GASTOS'] = _mat['TOTAL_GASTOS'].fillna(0)
-        _mat['GASTO_X_KM']  = np.where(_mat['KM']>0, _mat['TOTAL_GASTOS']/_mat['KM'], np.nan)
-    else:
-        _mat['GASTO_X_KM'] = np.nan
 
     if not _mat.empty and len(_mat) >= 2:
         _l100_med = _mat['L100KM'].median(); _kgkm_med = _mat['KG_KM'].median()
@@ -1412,14 +1188,13 @@ elif pg == "Datos Operativos":
         fig_mat = go.Figure()
         fig_mat.add_vline(x=_l100_med, line_dash='dash', line_color='#64748b', line_width=1.5)
         fig_mat.add_hline(y=_kgkm_med, line_dash='dash', line_color='#64748b', line_width=1.5)
-        gxkm_txt = _mat.apply(lambda r: f"${r['GASTO_X_KM']:,.0f}/km" if pd.notna(r.get('GASTO_X_KM')) and r.get('GASTO_X_KM',0)>0 else 'sin datos gasto', axis=1)
         fig_mat.add_trace(go.Scatter(
             x=_mat['L100KM'], y=_mat['KG_KM'], mode='markers+text',
             text=_mat['DOMINIO'], textposition='top center',
             textfont=dict(size=10, color='#0f172a', family='monospace'),
             marker=dict(size=18, color=_mat['CUAD_COLOR'], line=dict(color='white',width=2)),
-            customdata=list(zip(_mat['CUAD_LABEL'], _mat['CUAD_DESC'], _mat['MODELO'], gxkm_txt)),
-            hovertemplate='<b>%{text}</b> (%{customdata[2]})<br>L/100km: <b>%{x:.2f}</b> | kg/km: <b>%{y:.1f}</b><br>$/km mant.: <b>%{customdata[3]}</b><br><b>%{customdata[0]}</b> — %{customdata[1]}<extra></extra>',
+            customdata=list(zip(_mat['CUAD_LABEL'], _mat['CUAD_DESC'], _mat['MODELO'])),
+            hovertemplate='<b>%{text}</b> (%{customdata[2]})<br>L/100km: <b>%{x:.2f}</b> | kg/km: <b>%{y:.1f}</b><br><b>%{customdata[0]}</b> — %{customdata[1]}<extra></extra>',
             showlegend=False
         ))
         fig_mat.update_layout(paper_bgcolor=PAPER_BG, plot_bgcolor='rgba(255,255,255,0.7)', font=dict(color=FONT_COL),
@@ -1429,7 +1204,6 @@ elif pg == "Datos Operativos":
                        title=dict(text='kg/km  (↑ mayor = más productivo)', font=dict(color=AXIS_COL,size=11))),
             height=520, margin=dict(l=70,r=50,t=40,b=70))
         st.plotly_chart(fig_mat, use_container_width=True)
-        st.caption('Hover para detalle completo incluyendo $/km de mantenimiento')
 
     st.divider()
     st.markdown(f'<div class="sec-title">Peso por Mes y Patente (ton) — {anio_sel}</div>', unsafe_allow_html=True)
@@ -1450,4 +1224,4 @@ elif pg == "Datos Operativos":
             height=max(300, len(pivot_carga)*40), margin=dict(l=10,r=10,t=20,b=60))
         st.plotly_chart(fig_heat_c, use_container_width=True)
 
-    st.caption(f'Fuente: BI Expreso · Telemetría Google Sheets · Gastos Google Sheets · Año {anio_sel}')
+    st.caption(f'Fuente: BI Expreso · Telemetría Google Sheets · Año {anio_sel}')
