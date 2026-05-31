@@ -42,8 +42,7 @@ COND_BASE = "https://docs.google.com/spreadsheets/d/1teVcN0ejyvGbjWwWOHTmZ8I-17x
 URL_COND  = f"{COND_BASE}&gid=1146371669"
 
 # ── Gastos reparaciones (col A=fecha, B=patente, C=monto) ──
-GAST_BASE = "https://docs.google.com/spreadsheets/d/1u7cckay0IJ60bfoKk2OZo-TjCvTbH9O1wKxNFdSKDCQ/pub?output=csv"
-URL_GAST  = f"{GAST_BASE}&gid=33208473"
+URL_GAST  = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR35NkYPtJrOrdYHLGUH7GIW93s5cPAqQ0zEk5fP1c3gvErwbUW7HJ2OeWBYaBVsYKVmCf0yhLvs6eG/pub?output=csv"
 
 # Patentes LAD fijas conocidas
 PATENTES_LAD_FIJAS = set(SWAY_PATENTES + SCANIA_PATENTES)
@@ -426,10 +425,18 @@ def cargar_gastos(patentes_lad=None):
     Lee hoja de gastos de reparaciones.
     Col A = fecha, Col B = patente, Col C = monto.
     Parseo robusto: detecta formato arg ($158.133,60) o US (158133.6).
+    Detecta automáticamente si la hoja leída es la correcta (3 columnas: fecha/patente/monto).
     """
     try:
         df = pd.read_csv(URL_GAST, header=0)
         if df.empty or len(df.columns) < 3:
+            return pd.DataFrame()
+
+        # Heurística: detectar si las columnas matchean fecha/patente/monto
+        cols_upper = [str(c).upper() for c in df.columns]
+        cols_text = ' '.join(cols_upper)
+        # Si tiene columnas típicas de telemetría (LITROS, KM, MARCA, EMPRESA) probablemente es la hoja equivocada
+        if any(kw in cols_text for kw in ['LITROS','KILOMETR','MARCA','EMPRESA','TAG','RALENT']):
             return pd.DataFrame()
 
         df = df.iloc[:, :3].copy()
@@ -445,10 +452,17 @@ def cargar_gastos(patentes_lad=None):
         df['FECHA'] = pd.to_datetime(df['FECHA_RAW'], errors='coerce', dayfirst=True)
         df['MES_PERIODO'] = df['FECHA'].dt.to_period('M')
 
+        # Guardar TODOS los gastos antes de filtrar por LAD (para diagnóstico)
+        df_all = df.copy()
+
         if patentes_lad is not None and len(patentes_lad) > 0:
             df = df[df['DOMINIO'].isin(patentes_lad)].copy()
 
-        return df[['DOMINIO', 'FECHA', 'MES_PERIODO', 'TOTAL_GASTOS']].reset_index(drop=True)
+        result = df[['DOMINIO', 'FECHA', 'MES_PERIODO', 'TOTAL_GASTOS']].reset_index(drop=True)
+        # Atributo para diagnóstico
+        result.attrs['total_filas_raw'] = len(df_all)
+        result.attrs['patentes_en_hoja'] = df_all['DOMINIO'].nunique() if not df_all.empty else 0
+        return result
     except Exception:
         return pd.DataFrame()
 
@@ -776,6 +790,15 @@ if pg == "Dashboard Principal":
 
     gasto_total = df_gastos_anio['TOTAL_GASTOS'].sum() if not df_gastos_anio.empty else 0
     n_pat_gastos = df_gastos_anio['DOMINIO'].nunique() if not df_gastos_anio.empty else 0
+    # Diagnóstico: si la hoja se leyó pero no hay datos LAD, avisar
+    if df_gastos_raw.empty:
+        gasto_sub_extra = "⚠ Verificar URL/publicación"
+    elif gasto_total == 0:
+        total_raw = df_gastos_raw.attrs.get('total_filas_raw', 0) if hasattr(df_gastos_raw, 'attrs') else 0
+        pats_raw  = df_gastos_raw.attrs.get('patentes_en_hoja', 0) if hasattr(df_gastos_raw, 'attrs') else 0
+        gasto_sub_extra = f"⚠ {total_raw} gastos en hoja, 0 matchean LAD"
+    else:
+        gasto_sub_extra = None
 
     if len(meses_df) >= 2:
         delta_l100 = meses_df['L100'].iloc[-1] - meses_df['L100'].iloc[-2]
@@ -790,7 +813,8 @@ if pg == "Dashboard Principal":
     kpi(k3, delta_col, 'L/100km flota', f'{l100_prom:.2f}', delta_txt)
     k4, k5, k6 = st.columns(3)
     kpi(k4, 'kpi-amber', 'Costo combustible est.', f'${costo_est/1e6:.1f}M', f'@ ${precio_gasoil:,.0f}/L')
-    kpi(k5, 'kpi-purple', 'Gasto reparaciones', f'${gasto_total/1e6:.2f}M', f'{n_pat_gastos} patentes LAD · {anio_sel}')
+    _g_sub = gasto_sub_extra if gasto_sub_extra else f'{n_pat_gastos} patentes LAD · {anio_sel}'
+    kpi(k5, 'kpi-purple', 'Gasto reparaciones', f'${gasto_total/1e6:.2f}M', _g_sub)
     _ral_sub = f'{ralenti_total:,.0f} L · {ralenti_delta_txt}' if ralenti_delta_txt else f'{ralenti_total:,.0f} L en ralentí'
     kpi(k6, 'kpi-amber', '% Ralentí', f'{ralenti_pct:.1f}%', _ral_sub)
 
@@ -854,15 +878,25 @@ if pg == "Dashboard Principal":
     st.markdown(f'<div class="sec-title">IER-Chofer — Lo que controla el conductor — {anio_sel}</div>', unsafe_allow_html=True)
 
     tiene_cond = not df_cond_filtrado.empty and 'SCORE_CONDUCCION' in df_cond_filtrado.columns and df_cond_filtrado['SCORE_CONDUCCION'].notna().any()
-    w_cond_txt = "40% L/100km · 40% Conducción · 20% Severidad velocidad" if tiene_cond else "60% L/100km · 40% Severidad velocidad (sin datos de conducción)"
 
-    st.markdown(f"""<div class="ier-info-box">
+    if tiene_cond:
+        ier_box_html = """<div class="ier-info-box">
     <b>¿Qué mide?</b> Solo factores que el chofer controla: cómo maneja, cómo acelera/frena, si excede velocidad.<br>
     <b>KM totales excluidos</b> — los asigna tráfico, no el conductor.<br>
-    <b>Ponderación:</b> {w_cond_txt}<br>
+    <b>Ponderación:</b> 40% L/100km · 40% Conducción · 20% Severidad velocidad<br>
     <b>Score Conducción:</b> normalizado por marca (z-score) — cada telemetría compite contra sí misma para eliminar sesgo de calibración.<br>
+    <b>Severidad velocidad:</b> suma de km/h excedidos sobre 88 km/h por patente (fuente: hoja velocidades).<br>
     <b>Escala:</b> 🟢 Eficiente ≥105 · 🟡 Normal 95–105 · 🟠 Atención 85–95 · 🔴 Crítico &lt;85
-    </div>""", unsafe_allow_html=True)
+    </div>"""
+    else:
+        ier_box_html = """<div class="ier-info-box">
+    <b>¿Qué mide?</b> Solo factores que el chofer controla: consumo y velocidad.<br>
+    <b>KM totales excluidos</b> — los asigna tráfico, no el conductor.<br>
+    <b>Ponderación:</b> 60% L/100km · 40% Severidad velocidad <span style="color:#dc2626;">(sin datos de conducción disponibles — verificar publicación de hoja DATOS MANEJO)</span><br>
+    <b>Severidad velocidad:</b> suma de km/h excedidos sobre 88 km/h por patente.<br>
+    <b>Escala:</b> 🟢 Eficiente ≥105 · 🟡 Normal 95–105 · 🟠 Atención 85–95 · 🔴 Crítico &lt;85
+    </div>"""
+    st.markdown(ier_box_html, unsafe_allow_html=True)
 
     if not df_ier_chofer.empty:
         cats = df_ier_chofer['CLASIF_CHOFER'].value_counts()
