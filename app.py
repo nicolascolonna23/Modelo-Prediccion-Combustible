@@ -343,7 +343,13 @@ def cargar_reparaciones():
         df = df.rename(columns={cols[0]: 'FECHA', cols[1]: 'DOMINIO', cols[2]: 'MONTO'})
         df['FECHA']   = pd.to_datetime(df['FECHA'], dayfirst=True, errors='coerce')
         df['DOMINIO'] = df['DOMINIO'].astype(str).str.strip().str.upper().str.replace(r'\s+', '', regex=True)
-        df['MONTO']   = pd.to_numeric(df['MONTO'].astype(str).str.replace(r'[^\d.,]', '', regex=True).str.replace(',', '.'), errors='coerce').fillna(0)
+        df['MONTO']   = pd.to_numeric(
+            df['MONTO'].astype(str)
+            .str.replace(r'[^\d.,]', '', regex=True)  # quitar símbolos ($, espacios, etc.)
+            .str.replace('.', '', regex=False)          # quitar punto de miles (1.234,56 → 1234,56)
+            .str.replace(',', '.', regex=False),        # coma decimal → punto (1234,56 → 1234.56)
+            errors='coerce'
+        ).fillna(0)
         df = df[df['FECHA'].notna() & (df['DOMINIO'] != '') & (df['DOMINIO'] != 'NAN')].copy()
         return df[['FECHA','DOMINIO','MONTO']].reset_index(drop=True)
     except Exception:
@@ -414,7 +420,7 @@ def obtener_precio_gasoil():
                 return precio, "surtidores.com.ar"
     except Exception:
         pass
-    return 2025.0, "referencia estimada"
+    return 2300.0, "referencia estimada"
 def asignar_modelo(dominio):
     d = str(dominio).strip().upper()
     if d in SWAY_PATENTES:   return 'S-Way'
@@ -716,45 +722,25 @@ if pg == "Dashboard Principal":
     kpi(k5,'kpi-green','🚛 Unidades activas',f'{n_unidades}','dominios únicos')
     _ral_sub = (f'{ralenti_total:,.0f} L · {ralenti_delta_txt}' if ralenti_delta_txt else f'{ralenti_total:,.0f} L en ralentí')
     kpi(k6,'kpi-amber','⏱️ % Ralentí',f'{ralenti_pct:.1f}%',_ral_sub)
-    # ── Gastos de Reparaciones ───────────────────────────────────────────────
+    # ── Gastos de Reparaciones — KPI row ────────────────────────────────────
+    # Usar df_raw (todas las patentes LAD, sin filtros de sidebar)
     patentes_lad = df['DOMINIO'].dropna().unique().tolist() if 'DOMINIO' in df.columns else []
-    if not df_rep_raw.empty and patentes_lad:
+    if not df_rep_raw.empty:
         df_rep_anio = df_rep_raw[
-            df_rep_raw['DOMINIO'].isin(patentes_lad) &
             (df_rep_raw['FECHA'].dt.year == anio_sel)
         ].copy()
     else:
         df_rep_anio = pd.DataFrame()
-    st.divider()
-    st.markdown(f'<div class="sec-title">🔧 Gastos de Reparaciones — {anio_sel}</div>', unsafe_allow_html=True)
+    k7,k8,k9 = st.columns(3)
     if not df_rep_anio.empty:
-        total_rep    = df_rep_anio['MONTO'].sum()
-        n_eventos    = len(df_rep_anio)
-        pat_mayor    = df_rep_anio.groupby('DOMINIO')['MONTO'].sum().idxmax()
-        monto_mayor  = df_rep_anio.groupby('DOMINIO')['MONTO'].sum().max()
-        rk1,rk2,rk3 = st.columns(3)
-        kpi(rk1,'kpi-red','🔧 Total reparaciones',f'${total_rep:,.0f}',f'{n_eventos} registros {anio_sel}')
-        kpi(rk2,'kpi-amber','🚛 Mayor gasto',pat_mayor,f'${monto_mayor:,.0f}')
-        prom_rep = total_rep / max(len(df_rep_anio['DOMINIO'].unique()), 1)
-        kpi(rk3,'','📊 Prom. por patente',f'${prom_rep:,.0f}',f'{df_rep_anio["DOMINIO"].nunique()} patentes')
-        # Barras por patente
-        rep_por_pat = df_rep_anio.groupby('DOMINIO')['MONTO'].sum().reset_index().sort_values('MONTO', ascending=False)
-        fig_rep = go.Figure(go.Bar(
-            x=rep_por_pat['DOMINIO'], y=rep_por_pat['MONTO'],
-            marker_color=['#ef4444' if v==rep_por_pat['MONTO'].max() else '#3b82f6' for v in rep_por_pat['MONTO']],
-            text=[f'${v:,.0f}' for v in rep_por_pat['MONTO']], textposition='outside',
-            textfont=dict(color='#e2e8f0', size=11),
-            hovertemplate='<b>%{x}</b><br>Total reparaciones: <b>$%{y:,.0f}</b><extra></extra>'
-        ))
-        fig_rep.update_layout(
-            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(30,41,59,0.6)',
-            font=dict(color='#e2e8f0'),
-            xaxis=dict(gridcolor='#1e293b', tickfont=dict(color='#94a3b8')),
-            yaxis=dict(gridcolor='#1e293b', tickfont=dict(color='#94a3b8'),
-                       title=dict(text='$ Pesos', font=dict(color='#64748b'))),
-            height=320, margin=dict(l=10, r=10, t=20, b=40), showlegend=False
-        )
-        st.plotly_chart(fig_rep, use_container_width=True)
+        total_rep   = df_rep_anio['MONTO'].sum()
+        n_eventos   = len(df_rep_anio)
+        pat_mayor   = df_rep_anio.groupby('DOMINIO')['MONTO'].sum().idxmax()
+        monto_mayor = df_rep_anio.groupby('DOMINIO')['MONTO'].sum().max()
+        prom_rep    = total_rep / max(df_rep_anio['DOMINIO'].nunique(), 1)
+        kpi(k7,'kpi-red','🔧 Total reparaciones',f'${total_rep/1e6:.2f}M',f'{n_eventos} registros {anio_sel}')
+        kpi(k8,'kpi-amber','⚠️ Mayor gasto',pat_mayor,f'${monto_mayor:,.0f}')
+        kpi(k9,'','📊 Prom. por patente',f'${prom_rep:,.0f}',f'{df_rep_anio["DOMINIO"].nunique()} patentes')
         with st.expander('📋 Ver detalle de reparaciones'):
             rep_show = df_rep_anio.copy()
             rep_show['FECHA'] = rep_show['FECHA'].dt.strftime('%d/%m/%Y')
@@ -762,7 +748,10 @@ if pg == "Dashboard Principal":
             rep_show = rep_show.rename(columns={'FECHA':'Fecha','DOMINIO':'Patente','MONTO':'Monto'})
             st.dataframe(rep_show.sort_values('Fecha', ascending=False), use_container_width=True, hide_index=True)
     else:
-        st.info('Sin datos de reparaciones para el período seleccionado.')
+        kpi(k7,'kpi-red','🔧 Total reparaciones','—',f'sin datos {anio_sel}')
+        kpi(k8,'','⚠️ Mayor gasto','—','')
+        kpi(k9,'','📊 Prom. por patente','—','')
+        st.caption('⚠️ Para ver reparaciones: publicá la hoja (gid=33208473) en Google Sheets → Archivo → Compartir → Publicar en la web → CSV')
     st.divider()
     st.markdown(f'<div class="sec-title">Rendimiento por Modelo — {anio_sel}</div>', unsafe_allow_html=True)
     def stats_modelo(patentes_lista):
@@ -885,6 +874,8 @@ if pg == "Dashboard Principal":
             st.dataframe(ch_show, use_container_width=True, hide_index=True)
     else:
         st.info('Sin datos suficientes para calcular el IER-Chofer.')
+    if df_manejo_raw.empty:
+        st.caption('⚠️ Score conducción no disponible. Publicá las hojas STRALIS_RAW, SWAY_RAW y SCANIA_RAW en Google Sheets → Archivo → Compartir → Publicar en la web → CSV')
     if not df_vel_filtrado.empty and 'DOMINIO' in df_vel_filtrado.columns:
         st.divider()
         st.markdown(f'<div class="sec-title">🚨 Ranking Severidad Velocidad >{LIMITE_VELOCIDAD} km/h — {anio_sel}</div>', unsafe_allow_html=True)
