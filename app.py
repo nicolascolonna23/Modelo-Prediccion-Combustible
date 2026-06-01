@@ -820,9 +820,13 @@ if pg == "Dashboard Principal":
     _ral_sub = (f'{ralenti_total:,.0f} L · {ralenti_delta_txt}' if ralenti_delta_txt else f'{ralenti_total:,.0f} L en ralentí')
     kpi(k6,'kpi-amber','⏱️ % Ralentí',f'{ralenti_pct:.1f}%',_ral_sub)
 
-    # Reparaciones KPI row
+    # Reparaciones KPI row — filtra por patentes LAD (las que tienen telemetría)
+    patentes_lad = df_full['DOMINIO'].dropna().unique().tolist() if 'DOMINIO' in df_full.columns else []
     if not df_rep_raw.empty:
-        df_rep_anio = df_rep_raw[df_rep_raw['FECHA'].dt.year == anio_sel].copy()
+        df_rep_anio = df_rep_raw[
+            (df_rep_raw['FECHA'].dt.year == anio_sel) &
+            (df_rep_raw['DOMINIO'].isin(patentes_lad))
+        ].copy()
     else:
         df_rep_anio = pd.DataFrame()
     k7,k8,k9 = st.columns(3)
