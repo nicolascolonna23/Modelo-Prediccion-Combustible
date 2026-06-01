@@ -32,7 +32,12 @@ URL_TEL  = f"{BASE_URL}&gid={GID_TEL}"
 URL_UNID = f"{BASE_URL}&gid={GID_UNID}"
 URL_VEL  = f"{BASE_URL}&gid={GID_VEL}"
 CARGA_URL    = "http://bi.sistemaexpreso.com.ar/reporte_hojas.xlsx"
-MANEJO_URL   = "https://docs.google.com/spreadsheets/d/1teVcN0ejyvGbjWwWOHTmZ8I-17xyGZ0d8hxJ7dwSKm0/pub?output=csv&gid=1146371669"
+MANEJO_BASE  = "https://docs.google.com/spreadsheets/d/1teVcN0ejyvGbjWwWOHTmZ8I-17xyGZ0d8hxJ7dwSKm0/pub?output=csv&gid="
+MANEJO_SHEETS = [
+    {"gid": "0",          "modelo": "Stralis"},  # col I  = CORE_GENERAL
+    {"gid": "738544003",  "modelo": "S-Way"},    # col N  = CORE GENERAL
+    {"gid": "2022308308", "modelo": "Scania"},   # col M  = SCORE GENERAL
+]
 DARK_CSS = """
 <style>
 [data-testid="stAppViewContainer"] { background: #0f172a; }
@@ -296,32 +301,35 @@ def cargar_viajes_todos():
         return pd.DataFrame()
 @st.cache_data(ttl=600)
 def cargar_datos_manejo():
-    """Lee hoja CONSOLIDADO de DATOS MANEJO. Devuelve DOMINIO, MES, SCORE_CONDUCCION."""
-    try:
-        df = pd.read_csv(MANEJO_URL, header=0, skiprows=1)
-        df.columns = [str(c).strip() for c in df.columns]
-        cols = df.columns.tolist()
-        # Columnas esperadas: MES, DOMINIO, MODELO, RALENTI_10, ACELERACION_10, ANTICIPACION_10, FRENADO_10, SCORE_CONDUCCION
-        if len(cols) < 5:
-            return pd.DataFrame()
-        # Renombrar por posición (col A=MES, B=DOMINIO, H=SCORE o última col)
-        rename = {cols[0]: 'MES', cols[1]: 'DOMINIO', cols[2]: 'MODELO'}
-        if len(cols) >= 8:
-            rename[cols[7]] = 'SCORE_CONDUCCION'
-        elif len(cols) >= 7:
-            rename[cols[6]] = 'SCORE_CONDUCCION'
-        df = df.rename(columns=rename)
-        df['DOMINIO'] = df['DOMINIO'].astype(str).str.strip().str.upper().str.replace(r'\s+', '', regex=True)
-        df['MES']     = pd.to_datetime(df['MES'], dayfirst=True, errors='coerce')
-        if 'SCORE_CONDUCCION' not in df.columns:
-            return pd.DataFrame()
-        df['SCORE_CONDUCCION'] = (df['SCORE_CONDUCCION'].astype(str)
-                                  .str.replace(',', '.').str.replace(r'[^\d.]', '', regex=True))
-        df['SCORE_CONDUCCION'] = pd.to_numeric(df['SCORE_CONDUCCION'], errors='coerce')
-        df = df[df['MES'].notna() & df['DOMINIO'].notna() & df['SCORE_CONDUCCION'].notna()].copy()
-        return df[['DOMINIO','MES','SCORE_CONDUCCION']].reset_index(drop=True)
-    except Exception:
+    """Lee CORE_GENERAL / SCORE_GENERAL de las 3 hojas raw (Stralis, S-Way, Scania)."""
+    dfs = []
+    for sheet in MANEJO_SHEETS:
+        try:
+            url = MANEJO_BASE + sheet["gid"]
+            df  = pd.read_csv(url, header=0)
+            df.columns = [str(c).strip() for c in df.columns]
+            # Busca columna que tenga GENERAL o SCORE en el nombre
+            score_col = next(
+                (c for c in df.columns if any(k in c.upper() for k in ['GENERAL','SCORE_COND'])),
+                None
+            )
+            if score_col is None or len(df.columns) < 2:
+                continue
+            tmp = df[[df.columns[0], df.columns[1], score_col]].copy()
+            tmp.columns = ['MES', 'DOMINIO', 'SCORE_CONDUCCION']
+            dfs.append(tmp)
+        except Exception:
+            continue
+    if not dfs:
         return pd.DataFrame()
+    out = pd.concat(dfs, ignore_index=True)
+    out['DOMINIO'] = out['DOMINIO'].astype(str).str.strip().str.upper().str.replace(r'\s+', '', regex=True)
+    out['MES']     = pd.to_datetime(out['MES'], errors='coerce')
+    out['SCORE_CONDUCCION'] = (out['SCORE_CONDUCCION'].astype(str)
+                               .str.replace(',', '.').str.replace(r'[^\d.]', '', regex=True))
+    out['SCORE_CONDUCCION'] = pd.to_numeric(out['SCORE_CONDUCCION'], errors='coerce')
+    out = out[out['MES'].notna() & (out['DOMINIO'].str.len() > 2) & out['SCORE_CONDUCCION'].notna()]
+    return out[['DOMINIO','MES','SCORE_CONDUCCION']].reset_index(drop=True)
 @st.cache_data(ttl=600)
 def cargar_reparaciones():
     """Lee hoja de gastos de reparaciones (gid=33208473). Col A=Fecha, B=Patente, C=Monto."""
