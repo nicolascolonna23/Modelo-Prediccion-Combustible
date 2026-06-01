@@ -22,8 +22,7 @@ st.set_page_config(
 # ═══════════════════════════════════════════════════════════════════════════════
 #  CONFIG: URLs DE FUENTES DE DATOS — editá acá si cambian
 # ═══════════════════════════════════════════════════════════════════════════════
-LOGO_URL     = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/LOGO-BLANCO2.png"
-LOGO_SQUARE  = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/LOGO-BLANCO.png"
+LOGO_URL     = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/logo_diemar4.png"
 IVECO_URL    = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/S-Way-6x2-1.webp"
 SCANIA_URL   = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/2016p.png"
 STRALIS_URL  = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/image.png"
@@ -50,8 +49,10 @@ MANEJO_SHEETS = [
     {"gid": "2022308308", "modelo": "Scania"},
 ]
 
-# ── REPARACIONES — documento DISTINTO, mantiene la URL original ─────────────
-REP_URL = "https://docs.google.com/spreadsheets/d/1u7cckay0IJ60bfoKk2OZo-TjCvTbH9O1wKxNFdSKDCQ/pub?output=csv&gid=33208473"
+# ── REPARACIONES — gviz/tq funciona con hoja solo compartida (no requiere publicar) ──
+REP_SHEET_ID = "1u7cckay0IJ60bfoKk2OZo-TjCvTbH9O1wKxNFdSKDCQ"
+REP_GID      = "33208473"
+REP_URL      = f"https://docs.google.com/spreadsheets/d/{REP_SHEET_ID}/gviz/tq?tqx=out:csv&gid={REP_GID}&sheet=GASTOS%20REPARACIONES"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  CSS DARK THEME
@@ -81,12 +82,15 @@ section[data-testid="stMain"] { background: #0f172a; }
     border-left:4px solid #2563eb; padding-left:10px; margin:18px 0 10px;
 }
 .truck-img-box {
-    width:100%; height:280px; border-radius:12px; background:#1e293b;
+    width:100%; height:280px; border-radius:12px;
+    background:linear-gradient(135deg, #f1f5f9 0%, #cbd5e1 100%);
     display:flex; align-items:center; justify-content:center; overflow:hidden;
+    border:1px solid #334155;
 }
 .truck-img-box img {
     max-width:100%; max-height:100%; width:100%; height:100%;
     object-fit:contain; object-position:center; padding:12px;
+    mix-blend-mode: multiply;
 }
 .rank-row    { display:flex; align-items:center; padding:8px 0; border-bottom:1px solid #334155; }
 .rank-num    { width:28px; font-weight:700; font-size:.9rem; color:#94a3b8; }
