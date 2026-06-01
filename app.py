@@ -658,6 +658,11 @@ if not df_vel_raw.empty and 'FECHA' in df_vel_raw.columns:
 else:
     df_vel_anio = df_vel_raw.copy()
 
+# Inicializar valores por defecto para filtros
+desde_periodo = None
+hasta_periodo = None
+patentes_sel = []
+
 if 'FECHA' in df.columns and df['FECHA'].notna().any():
     st.sidebar.markdown("---")
     st.sidebar.markdown('<div class="sidebar-filter-header">🔍 Filtros</div>', unsafe_allow_html=True)
@@ -820,13 +825,16 @@ if pg == "Dashboard Principal":
     _ral_sub = (f'{ralenti_total:,.0f} L · {ralenti_delta_txt}' if ralenti_delta_txt else f'{ralenti_total:,.0f} L en ralentí')
     kpi(k6,'kpi-amber','⏱️ % Ralentí',f'{ralenti_pct:.1f}%',_ral_sub)
 
-    # Reparaciones KPI row — filtra por patentes LAD (las que tienen telemetría)
-    patentes_lad = df_full['DOMINIO'].dropna().unique().tolist() if 'DOMINIO' in df_full.columns else []
-    if not df_rep_raw.empty:
-        df_rep_anio = df_rep_raw[
-            (df_rep_raw['FECHA'].dt.year == anio_sel) &
-            (df_rep_raw['DOMINIO'].isin(patentes_lad))
-        ].copy()
+    # Reparaciones KPI row — respeta filtros de fecha y patente
+    patentes_filtradas = df['DOMINIO'].dropna().unique().tolist() if 'DOMINIO' in df.columns else []
+    if not df_rep_raw.empty and patentes_filtradas and desde_periodo is not None and hasta_periodo is not None:
+        rep_periodo = df_rep_raw['FECHA'].dt.to_period('M')
+        mask = (
+            (rep_periodo >= desde_periodo) &
+            (rep_periodo <= hasta_periodo) &
+            (df_rep_raw['DOMINIO'].isin(patentes_filtradas))
+        )
+        df_rep_anio = df_rep_raw[mask].copy()
     else:
         df_rep_anio = pd.DataFrame()
     k7,k8,k9 = st.columns(3)
@@ -836,20 +844,15 @@ if pg == "Dashboard Principal":
         pat_mayor   = df_rep_anio.groupby('DOMINIO')['MONTO'].sum().idxmax()
         monto_mayor = df_rep_anio.groupby('DOMINIO')['MONTO'].sum().max()
         prom_rep    = total_rep / max(df_rep_anio['DOMINIO'].nunique(), 1)
-        kpi(k7,'kpi-red','🔧 Total reparaciones',f'${total_rep/1e6:.2f}M',f'{n_eventos} registros {anio_sel}')
+        kpi(k7,'kpi-red','🔧 Total reparaciones',f'${total_rep/1e6:.2f}M',f'{n_eventos} registros')
         kpi(k8,'kpi-amber','⚠️ Mayor gasto',pat_mayor,f'${monto_mayor:,.0f}')
         kpi(k9,'','📊 Prom. por patente',f'${prom_rep:,.0f}',f'{df_rep_anio["DOMINIO"].nunique()} patentes')
-        with st.expander('📋 Ver detalle de reparaciones'):
-            rep_show = df_rep_anio.copy()
-            rep_show['FECHA'] = rep_show['FECHA'].dt.strftime('%m/%Y')
-            rep_show['MONTO'] = rep_show['MONTO'].apply(lambda x: f'${x:,.0f}')
-            rep_show = rep_show.rename(columns={'FECHA':'Período','DOMINIO':'Patente','MONTO':'Monto'})
-            st.dataframe(rep_show.sort_values('Período', ascending=False), use_container_width=True, hide_index=True)
     else:
-        kpi(k7,'kpi-red','🔧 Total reparaciones','—',f'sin datos {anio_sel}')
+        kpi(k7,'kpi-red','🔧 Total reparaciones','—','sin datos en el rango')
         kpi(k8,'','⚠️ Mayor gasto','—','')
         kpi(k9,'','📊 Prom. por patente','—','')
-        st.warning(f'⚠️ Reparaciones no disponibles. HTTP {rep_diag["status"]}: {rep_diag["err"]}. Andá a la pestaña **🔧 Diagnóstico** para más detalles.')
+        if df_rep_raw.empty:
+            st.warning(f'⚠️ Reparaciones no disponibles. HTTP {rep_diag["status"]}: {rep_diag["err"]}. Andá a la pestaña **🔧 Diagnóstico** para más detalles.')
 
     st.divider()
     st.markdown(f'<div class="sec-title">Rendimiento por Modelo — {anio_sel}</div>', unsafe_allow_html=True)
@@ -904,7 +907,7 @@ if pg == "Dashboard Principal":
     st.divider()
     st.markdown(f'<div class="sec-title">📊 IER-Chofer — Lo que controla el conductor — {anio_sel}</div>', unsafe_allow_html=True)
     tiene_manejo_disp = not df_ier_chofer.empty and df_ier_chofer['TIENE_MANEJO'].any()
-    pond_manejo = ('✅' if tiene_manejo_disp else '⚠️ sin datos este período')
+    pond_manejo = ('' if tiene_manejo_disp else '⚠️ sin datos este período')
     st.markdown(f"""<div class="ier-info-box">
     <b>¿Qué mide?</b> Solo factores que el chofer controla: consumo, estilo de conducción y velocidad.<br>
     <b>Ponderación:</b> <b>40%</b> L/100km &nbsp;·&nbsp; <b>40%</b> Score conducción {pond_manejo} &nbsp;·&nbsp; <b>20%</b> Severidad velocidad<br>
