@@ -22,10 +22,11 @@ st.set_page_config(
 # ═══════════════════════════════════════════════════════════════════════════════
 #  CONFIG: URLs DE FUENTES DE DATOS — editá acá si cambian
 # ═══════════════════════════════════════════════════════════════════════════════
-LOGO_URL    = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/logo_diemar4.png"
-IVECO_URL   = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/S-Way-6x2-1.webp"
-SCANIA_URL  = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/2016p.png"
-STRALIS_URL = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/image.png"
+LOGO_URL     = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/LOGO-BLANCO2.png"
+LOGO_SQUARE  = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/LOGO-BLANCO.png"
+IVECO_URL    = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/S-Way-6x2-1.webp"
+SCANIA_URL   = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/2016p.png"
+STRALIS_URL  = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/image.png"
 
 SWAY_PATENTES   = ['AH522SI', 'AH862UB', 'AH938VO', 'AH842GQ']
 SCANIA_PATENTES = ['AD247MQ', 'AE423IW']
@@ -49,106 +50,101 @@ MANEJO_SHEETS = [
     {"gid": "2022308308", "modelo": "Scania"},
 ]
 
-# ── REPARACIONES — usa la misma URL nueva o reemplazá ───────────────────────
-REP_URL = f"{MANEJO_BASE_NEW}&gid=33208473"
+# ── REPARACIONES — documento DISTINTO, mantiene la URL original ─────────────
+REP_URL = "https://docs.google.com/spreadsheets/d/1u7cckay0IJ60bfoKk2OZo-TjCvTbH9O1wKxNFdSKDCQ/pub?output=csv&gid=33208473"
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  CSS LIGHT THEME
+#  CSS DARK THEME
 # ═══════════════════════════════════════════════════════════════════════════════
 LIGHT_CSS = """
 <style>
-[data-testid="stAppViewContainer"] { background: #f8fafc; }
-[data-testid="stSidebar"] { background: #ffffff; border-right: 1px solid #e2e8f0; }
-section[data-testid="stMain"] { background: #f8fafc; }
-.stMarkdown, .stCaption, label, p, span, div { color: #1e293b !important; }
-[data-testid="stMetricValue"] { color: #0f172a !important; }
-[data-testid="stMetricDelta"] { color: #475569 !important; }
+[data-testid="stAppViewContainer"] { background: #0f172a; }
+[data-testid="stSidebar"] { background: #1e293b; }
+section[data-testid="stMain"] { background: #0f172a; }
+.stMarkdown, .stCaption, label, p, span, div { color: #e2e8f0 !important; }
+[data-testid="stMetricValue"] { color: #f1f5f9 !important; }
+[data-testid="stMetricDelta"] { color: #94a3b8 !important; }
 .kpi-card {
-    background: #ffffff; border-radius: 14px; padding: 24px 28px;
-    box-shadow: 0 2px 8px rgba(15,23,42,0.06); text-align: center;
+    background: #1e293b; border-radius: 14px; padding: 24px 28px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.4); text-align: center;
     border-left: 5px solid #2563eb; margin-bottom: 16px;
-    border: 1px solid #e2e8f0;
 }
-.kpi-label  { font-size:0.78rem; color:#64748b; font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
-.kpi-value  { font-size:2rem; font-weight:800; color:#0f172a; line-height:1.1; }
-.kpi-sub    { font-size:0.75rem; color:#94a3b8; margin-top:4px; }
-.kpi-red    { border-left-color:#dc2626; }
-.kpi-green  { border-left-color:#16a34a; }
-.kpi-amber  { border-left-color:#d97706; }
-.kpi-purple { border-left-color:#9333ea; }
+.kpi-label  { font-size:0.78rem; color:#94a3b8; font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
+.kpi-value  { font-size:2rem; font-weight:800; color:#f1f5f9; line-height:1.1; }
+.kpi-sub    { font-size:0.75rem; color:#64748b; margin-top:4px; }
+.kpi-red    { border-left-color:#ef4444; }
+.kpi-green  { border-left-color:#22c55e; }
+.kpi-amber  { border-left-color:#f59e0b; }
+.kpi-purple { border-left-color:#a855f7; }
 .sec-title {
-    font-size:1.1rem; font-weight:700; color:#0f172a;
+    font-size:1.1rem; font-weight:700; color:#e2e8f0;
     border-left:4px solid #2563eb; padding-left:10px; margin:18px 0 10px;
 }
 .truck-img-box {
-    width:100%; height:280px; border-radius:12px; background:#ffffff;
+    width:100%; height:280px; border-radius:12px; background:#1e293b;
     display:flex; align-items:center; justify-content:center; overflow:hidden;
-    border:1px solid #e2e8f0;
 }
 .truck-img-box img {
     max-width:100%; max-height:100%; width:100%; height:100%;
     object-fit:contain; object-position:center; padding:12px;
 }
-.rank-row    { display:flex; align-items:center; padding:8px 0; border-bottom:1px solid #e2e8f0; }
-.rank-num    { width:28px; font-weight:700; font-size:.9rem; color:#64748b; }
-.rank-dom    { flex:1; font-size:.88rem; color:#0f172a; font-weight:600; }
+.rank-row    { display:flex; align-items:center; padding:8px 0; border-bottom:1px solid #334155; }
+.rank-num    { width:28px; font-weight:700; font-size:.9rem; color:#94a3b8; }
+.rank-dom    { flex:1; font-size:.88rem; color:#e2e8f0; font-weight:600; }
 .rank-val    { font-size:.88rem; font-weight:700; }
-.rank-bar-bg { width:80px; height:6px; background:#e2e8f0; border-radius:3px; margin:0 10px; overflow:hidden; }
+.rank-bar-bg { width:80px; height:6px; background:#334155; border-radius:3px; margin:0 10px; overflow:hidden; }
 .rank-bar    { height:6px; border-radius:3px; }
-.alert-box   { background:#fef2f2; border:1px solid #dc2626; border-radius:10px; padding:14px 18px; margin:10px 0; color:#7f1d1d; }
-.alert-ok    { background:#f0fdf4; border:1px solid #16a34a; border-radius:10px; padding:14px 18px; margin:10px 0; color:#14532d; }
-.alert-box * { color:#7f1d1d !important; }
-.alert-ok *  { color:#14532d !important; }
-.highlight-max { background:#fef2f2; border:1px solid #dc2626; border-radius:10px; padding:14px 18px; margin:6px 0; color:#7f1d1d; }
-.highlight-min { background:#f0fdf4; border:1px solid #16a34a; border-radius:10px; padding:14px 18px; margin:6px 0; color:#14532d; }
-.highlight-max * { color:#7f1d1d !important; }
-.highlight-min * { color:#14532d !important; }
+.alert-box   { background:#450a0a; border:1px solid #ef4444; border-radius:10px; padding:14px 18px; margin:10px 0; }
+.alert-ok    { background:#052e16; border:1px solid #22c55e; border-radius:10px; padding:14px 18px; margin:10px 0; }
+.highlight-max { background:#450a0a; border:1px solid #ef4444; border-radius:10px; padding:14px 18px; margin:6px 0; }
+.highlight-min { background:#052e16; border:1px solid #22c55e; border-radius:10px; padding:14px 18px; margin:6px 0; }
 .training-badge {
-    background:#eef2ff; border:1px solid #6366f1; border-radius:8px;
-    padding:6px 12px; display:inline-block; font-size:0.8rem; color:#4338ca !important; font-weight:600;
+    background:#1e1b4b; border:1px solid #6366f1; border-radius:8px;
+    padding:6px 12px; display:inline-block; font-size:0.8rem; color:#a5b4fc; font-weight:600;
     margin-bottom: 12px;
 }
-.training-badge * { color:#4338ca !important; }
 .sidebar-filter-header {
     font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px;
-    color:#94a3b8; margin-bottom:10px; padding:6px 0; border-bottom:1px solid #e2e8f0;
+    color:#64748b; margin-bottom:10px; padding:6px 0; border-bottom:1px solid #334155;
+}
+[data-testid="stSidebar"] [data-testid="stDateInput"] label,
+[data-testid="stSidebar"] [data-testid="stMultiSelect"] label {
+    font-size:.78rem !important; color:#94a3b8 !important; font-weight:600 !important;
 }
 .ier-info-box {
-    background:#eff6ff; border:1px solid #3b82f6; border-radius:10px;
-    padding:14px 18px; margin:10px 0; font-size:.85rem; color:#1e40af !important; line-height:1.6;
+    background:#0f2744; border:1px solid #2563eb; border-radius:10px;
+    padding:14px 18px; margin:10px 0; font-size:.85rem; color:#93c5fd; line-height:1.6;
 }
-.ier-info-box * { color:#1e40af !important; }
 .ier-gauge-wrap {
-    background:#ffffff; border-radius:14px; padding:18px 22px;
+    background:#1e293b; border-radius:14px; padding:18px 22px;
     border-left:5px solid #6366f1; margin-bottom:12px; text-align:center;
-    border:1px solid #e2e8f0;
 }
 .ier-score-big { font-size:2.4rem; font-weight:900; line-height:1; }
 .ier-clasif    { font-size:.85rem; font-weight:700; margin-top:4px; }
 .ier-comp-row  {
     display:flex; align-items:center; justify-content:space-between;
-    background:#f8fafc; border-radius:8px; padding:8px 14px; margin:4px 0;
-    font-size:.82rem; border:1px solid #e2e8f0;
+    background:#0f172a; border-radius:8px; padding:8px 14px; margin:4px 0;
+    font-size:.82rem;
 }
-.ier-comp-label { color:#64748b !important; flex:1; }
-.ier-comp-val   { font-weight:700; color:#0f172a !important; }
-.ier-comp-bar-bg { width:90px; height:6px; background:#e2e8f0; border-radius:3px; margin:0 10px; overflow:hidden; }
+.ier-comp-label { color:#94a3b8; flex:1; }
+.ier-comp-val   { font-weight:700; color:#e2e8f0; }
+.ier-comp-bar-bg { width:90px; height:6px; background:#334155; border-radius:3px; margin:0 10px; overflow:hidden; }
 .ier-comp-bar    { height:6px; border-radius:3px; }
-.diag-ok   { color:#16a34a; font-weight:700; }
-.diag-fail { color:#dc2626; font-weight:700; }
+.diag-ok   { color:#22c55e; font-weight:700; }
+.diag-fail { color:#ef4444; font-weight:700; }
 .diag-row  {
-    background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px;
-    padding:6px 10px; margin:3px 0; font-size:.75rem; font-family:monospace;
+    background:#0f172a; border:1px solid #334155; border-radius:6px;
+    padding:6px 10px; margin:3px 0; font-size:.75rem; font-family:monospace; color:#e2e8f0;
 }
 </style>
 """
 
-# Plotly: paleta light
-PLOTLY_BG      = '#ffffff'
-PLOTLY_GRID    = '#e2e8f0'
-PLOTLY_FONT    = '#0f172a'
-PLOTLY_AXIS    = '#64748b'
-PLOTLY_SUBTLE  = '#94a3b8'
+# Plotly: paleta dark
+PLOTLY_BG      = 'rgba(0,0,0,0)'
+PLOTLY_GRID    = '#1e293b'
+PLOTLY_FONT    = '#e2e8f0'
+PLOTLY_AXIS    = '#94a3b8'
+PLOTLY_SUBTLE  = '#64748b'
 
 pg = st.sidebar.radio(
     "Navegacion",
@@ -365,7 +361,7 @@ def cargar_datos_manejo():
 
 @st.cache_data(ttl=600)
 def cargar_reparaciones():
-    """Lee hoja gastos reparaciones. Col A=Fecha, B=Patente, C=Monto."""
+    """Lee hoja gastos reparaciones. Col A=Periodo (MM/YYYY), B=Patente, C=Monto."""
     diag = {'url': REP_URL, 'status': '?', 'rows': 0, 'cols': [], 'err': '', 'sample': []}
     try:
         r = requests.get(REP_URL, timeout=15)
@@ -379,10 +375,16 @@ def cargar_reparaciones():
         diag['rows'] = len(df)
         cols = df.columns.tolist()
         if len(cols) < 3:
-            diag['err'] = f'Solo {len(cols)} columnas, se necesitan 3 (Fecha, Patente, Monto)'
+            diag['err'] = f'Solo {len(cols)} columnas, se necesitan 3 (Periodo, Patente, Monto)'
             return pd.DataFrame(), diag
         df = df.rename(columns={cols[0]: 'FECHA', cols[1]: 'DOMINIO', cols[2]: 'MONTO'})
-        df['FECHA']   = pd.to_datetime(df['FECHA'], dayfirst=True, errors='coerce')
+        # Parser robusto: intenta MM/YYYY primero, después fechas completas
+        fecha_str = df['FECHA'].astype(str).str.strip()
+        df['FECHA'] = pd.to_datetime(fecha_str, format='%m/%Y', errors='coerce')
+        mask_na = df['FECHA'].isna()
+        if mask_na.any():
+            # fallback fechas con día
+            df.loc[mask_na, 'FECHA'] = pd.to_datetime(fecha_str[mask_na], dayfirst=True, errors='coerce')
         df['DOMINIO'] = df['DOMINIO'].astype(str).str.strip().str.upper().str.replace(r'\s+', '', regex=True)
         df['MONTO']   = pd.to_numeric(
             df['MONTO'].astype(str)
@@ -392,8 +394,10 @@ def cargar_reparaciones():
             errors='coerce'
         ).fillna(0)
         df = df[df['FECHA'].notna() & (df['DOMINIO'] != '') & (df['DOMINIO'] != 'NAN')].copy()
+        # Filtrar solo registros con monto > 0
+        df = df[df['MONTO'] > 0].copy()
         diag['sample'] = df.head(3).to_dict('records')
-        diag['err'] = f'OK — {len(df)} registros válidos'
+        diag['err'] = f'OK — {len(df)} registros con monto > 0'
         return df[['FECHA','DOMINIO','MONTO']].reset_index(drop=True), diag
     except Exception as e:
         diag['err'] = str(e)[:200]
@@ -708,11 +712,11 @@ df_ier_chofer = calcular_ier_chofer(df, df_vel_filtrado, df_manejo_raw)
 total_excesos  = len(df_vel_filtrado) if not df_vel_filtrado.empty else 0
 vel_max_global = (df_vel_filtrado['VELOCIDAD'].max() if not df_vel_filtrado.empty and 'VELOCIDAD' in df_vel_filtrado.columns else 0)
 
-# Helper para layouts plotly light
+# Helper para layouts plotly dark
 def layout_light(fig, **kwargs):
     fig.update_layout(
         paper_bgcolor=PLOTLY_BG,
-        plot_bgcolor='#f8fafc',
+        plot_bgcolor='rgba(30,41,59,0.6)',
         font=dict(color=PLOTLY_FONT),
         **kwargs
     )
@@ -784,8 +788,8 @@ if pg == "Dashboard Principal":
     with col_logo: st.image(LOGO_URL, width=130)
     with col_title:
         st.markdown(f"""<div style='padding:8px 0;'>
-        <div style='font-size:1.6rem;font-weight:800;color:#0f172a;'>Expreso Diemar &mdash; Dashboard LAD {anio_sel}</div>
-        <div style='font-size:.9rem;color:#64748b;margin-top:4px;'>Telemetría flota LAD &middot; Año {anio_sel} &middot; Actualización automática</div>
+        <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>Expreso Diemar &mdash; Dashboard LAD {anio_sel}</div>
+        <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Telemetría flota LAD &middot; Año {anio_sel} &middot; Actualización automática</div>
         </div>""", unsafe_allow_html=True)
     st.markdown(f'<div class="sec-title">Métricas Globales — {anio_sel}</div>', unsafe_allow_html=True)
     lts_total  = df['LITROS'].sum() if 'LITROS' in df.columns else 0
@@ -829,10 +833,10 @@ if pg == "Dashboard Principal":
         kpi(k9,'','📊 Prom. por patente',f'${prom_rep:,.0f}',f'{df_rep_anio["DOMINIO"].nunique()} patentes')
         with st.expander('📋 Ver detalle de reparaciones'):
             rep_show = df_rep_anio.copy()
-            rep_show['FECHA'] = rep_show['FECHA'].dt.strftime('%d/%m/%Y')
+            rep_show['FECHA'] = rep_show['FECHA'].dt.strftime('%m/%Y')
             rep_show['MONTO'] = rep_show['MONTO'].apply(lambda x: f'${x:,.0f}')
-            rep_show = rep_show.rename(columns={'FECHA':'Fecha','DOMINIO':'Patente','MONTO':'Monto'})
-            st.dataframe(rep_show.sort_values('Fecha', ascending=False), use_container_width=True, hide_index=True)
+            rep_show = rep_show.rename(columns={'FECHA':'Período','DOMINIO':'Patente','MONTO':'Monto'})
+            st.dataframe(rep_show.sort_values('Período', ascending=False), use_container_width=True, hide_index=True)
     else:
         kpi(k7,'kpi-red','🔧 Total reparaciones','—',f'sin datos {anio_sel}')
         kpi(k8,'','⚠️ Mayor gasto','—','')
@@ -873,7 +877,7 @@ if pg == "Dashboard Principal":
             st.markdown(f'**{titulo}**')
             if df_rank.empty: st.info('Sin datos.'); return
             vmin,vmax=df_rank['L100KM'].min(),df_rank['L100KM'].max()
-            rh='<div style="background:#ffffff;border-radius:12px;padding:16px;border:1px solid #e2e8f0;">'
+            rh='<div style="background:#1e293b;border-radius:12px;padding:16px;">'
             rh+='<div style="font-size:.72rem;display:flex;justify-content:space-between;color:#64748b;margin-bottom:6px;"><span>Unidad</span><span>L/100km</span></div>'
             for i,(_,r) in enumerate(df_rank.iterrows(),1):
                 v=r['L100KM']; pct=int((v-vmin)/(vmax-vmin)*100) if vmax!=vmin else 50; cb=color_fn(i)
@@ -885,9 +889,9 @@ if pg == "Dashboard Principal":
     if 'DOMINIO' in df.columns and 'L100KM' in df.columns:
         base=df[df['L100KM']>0].groupby('DOMINIO')['L100KM'].mean().round(2).reset_index()
         render_ranking(rcol1,'TOP 10 más eficientes (menor L/100km)',base.sort_values('L100KM').head(10),
-                       lambda i:'#16a34a' if i<=3 else ('#d97706' if i<=6 else '#dc2626'))
+                       lambda i:'#22c55e' if i<=3 else ('#f59e0b' if i<=6 else '#ef4444'))
         render_ranking(rcol2,'TOP 10 menos eficientes (mayor L/100km)',base.sort_values('L100KM',ascending=False).head(10),
-                       lambda i:'#dc2626' if i<=3 else ('#d97706' if i<=6 else '#16a34a'))
+                       lambda i:'#ef4444' if i<=3 else ('#f59e0b' if i<=6 else '#22c55e'))
 
     st.divider()
     st.markdown(f'<div class="sec-title">📊 IER-Chofer — Lo que controla el conductor — {anio_sel}</div>', unsafe_allow_html=True)
@@ -908,13 +912,13 @@ if pg == "Dashboard Principal":
         ic4.metric('🔴 Crítico',int(cats_c.get('🔴 Crítico',0)),'IER < 85')
         st.markdown('<br>', unsafe_allow_html=True)
         def ier_bar_color(v):
-            if v>=105: return '#16a34a'
-            elif v>=95: return '#d97706'
-            elif v>=85: return '#ea580c'
-            else: return '#dc2626'
+            if v>=105: return '#22c55e'
+            elif v>=95: return '#f59e0b'
+            elif v>=85: return '#f97316'
+            else: return '#ef4444'
         df_ch_sorted = df_ier_chofer.sort_values(['MODELO','IER'],ascending=[True,False])
         fig_ch=go.Figure()
-        MODELO_COLOR={'S-Way':'#3b82f6','Scania':'#ea580c','Stralis':'#8b5cf6'}
+        MODELO_COLOR={'S-Way':'#3b82f6','Scania':'#f97316','Stralis':'#a78bfa'}
         for modelo in MODELO_COLOR:
             subset=df_ch_sorted[df_ch_sorted['MODELO']==modelo]
             if subset.empty: continue
@@ -932,8 +936,8 @@ if pg == "Dashboard Principal":
                 text=[f"{v:.1f}" for v in subset['IER']],textposition='outside',textfont=dict(color=PLOTLY_FONT,size=10),
                 hovertemplate='%{customdata}<extra></extra>',customdata=hover))
         ch_min=max(50,df_ch_sorted['IER'].min()-10); ch_max=min(175,df_ch_sorted['IER'].max()+25)
-        fig_ch.add_vline(x=100,line_dash='solid',line_color='#d97706',line_width=2.5,
-                         annotation_text='Base 100',annotation_position='top',annotation_font_color='#92400e',annotation_font_size=11)
+        fig_ch.add_vline(x=100,line_dash='solid',line_color='#f59e0b',line_width=2.5,
+                         annotation_text='Base 100',annotation_position='top',annotation_font_color='#fbbf24',annotation_font_size=11)
         layout_light(fig_ch,
             barmode='overlay',
             xaxis=dict(gridcolor=PLOTLY_GRID,tickfont=dict(color=PLOTLY_AXIS),title=dict(text='IER-Chofer (100 = promedio de su modelo)',font=dict(color=PLOTLY_AXIS)),range=[ch_min,ch_max]),
@@ -954,7 +958,7 @@ if pg == "Dashboard Principal":
         ).reset_index().sort_values('SEVERIDAD',ascending=False))
         vel_rank['MODELO']=vel_rank['DOMINIO'].apply(asignar_modelo)
         fig_vel=go.Figure([go.Bar(x=vel_rank['DOMINIO'],y=vel_rank['SEVERIDAD'].round(0),
-            marker_color=['#dc2626' if v==vel_rank['SEVERIDAD'].max() else '#ea580c' for v in vel_rank['SEVERIDAD']],
+            marker_color=['#ef4444' if v==vel_rank['SEVERIDAD'].max() else '#f97316' for v in vel_rank['SEVERIDAD']],
             text=vel_rank['SEVERIDAD'].round(0).astype(int),textposition='outside',textfont=dict(color=PLOTLY_FONT,size=10),
             hovertemplate='<b>%{x}</b><br>Severidad: +%{y:.0f} km/h<extra></extra>')])
         layout_light(fig_vel,
@@ -973,8 +977,8 @@ elif pg == "Modelo Predictivo":
     with col_logo2: st.image(LOGO_URL, width=130)
     with col_title2:
         st.markdown("""<div style='padding:8px 0;'>
-        <div style='font-size:1.6rem;font-weight:800;color:#0f172a;'>Modelo Predictivo &mdash; LAD</div>
-        <div style='font-size:.9rem;color:#64748b;margin-top:4px;'>Regresión polinomial &middot; Simulador What-If</div>
+        <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>Modelo Predictivo &mdash; LAD</div>
+        <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Regresión polinomial &middot; Simulador What-If</div>
         </div>""", unsafe_allow_html=True)
     anos_en_hist=(sorted(df_full_clean['FECHA'].dt.year.unique().tolist()) if 'FECHA' in df_full_clean.columns else [])
     anos_str=" · ".join(str(a) for a in anos_en_hist)
@@ -996,12 +1000,12 @@ elif pg == "Modelo Predictivo":
         def render_pred_card(mes, l100_p, lts_p, precio_gasoil):
             costo_p = lts_p * precio_gasoil
             return (
-                f'<div class="kpi-card" style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:14px 10px;text-align:center;">'
-                f'<div style="font-size:.72rem;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">{mes}</div>'
+                f'<div class="kpi-card" style="background:#1e293b;border:1px solid #334155;border-radius:12px;padding:14px 10px;text-align:center;">'
+                f'<div style="font-size:.72rem;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">{mes}</div>'
                 f'<div style="font-size:1.55rem;font-weight:700;color:#ea580c;line-height:1.1;">{l100_p:.2f}</div>'
-                f'<div style="font-size:.78rem;color:#64748b;margin-bottom:6px;">L/100km</div>'
+                f'<div style="font-size:.78rem;color:#94a3b8;margin-bottom:6px;">L/100km</div>'
                 f'<div style="border-top:1px solid #e2e8f0;padding-top:6px;margin-top:2px;">'
-                f'<div style="font-size:.82rem;color:#0f172a;font-weight:600;">{lts_p:,.0f} L</div>'
+                f'<div style="font-size:.82rem;color:#e2e8f0;font-weight:600;">{lts_p:,.0f} L</div>'
                 f'<div style="font-size:.75rem;color:#94a3b8;">${costo_p/1e6:.2f}M est.</div>'
                 f'</div></div>'
             )
@@ -1027,11 +1031,11 @@ elif pg == "Modelo Predictivo":
         fig.add_trace(go.Scatter(x=pred_labels,y=upper_clean,mode='lines',line=dict(color='#3b82f6',width=1,dash='dot'),name='CI sup'))
         fig.add_trace(go.Scatter(x=pred_labels,y=lower_clean,mode='lines',line=dict(color='#3b82f6',width=1,dash='dot'),name='CI inf'))
         hist_x=[all_labels[i] for i,v in enumerate(all_hist) if v is not None]; hist_y=[v for v in all_hist if v is not None]
-        fig.add_trace(go.Scatter(x=hist_x,y=hist_y,mode='lines+markers',line=dict(color='#dc2626',width=2.5),marker=dict(size=7,color='#dc2626'),name='Histórico'))
+        fig.add_trace(go.Scatter(x=hist_x,y=hist_y,mode='lines+markers',line=dict(color='#ef4444',width=2.5),marker=dict(size=7,color='#ef4444'),name='Histórico'))
         pred_x=[all_labels[i] for i,v in enumerate(all_pred) if v is not None]; pred_y=[v for v in all_pred if v is not None]
-        fig.add_trace(go.Scatter(x=pred_x,y=pred_y,mode='lines+markers',line=dict(color='#d97706',width=4,dash='dash'),marker=dict(size=11,color='#d97706',symbol='diamond'),name='Predicción'))
+        fig.add_trace(go.Scatter(x=pred_x,y=pred_y,mode='lines+markers',line=dict(color='#f59e0b',width=4,dash='dash'),marker=dict(size=11,color='#f59e0b',symbol='diamond'),name='Predicción'))
         layout_light(fig,
-            legend=dict(bgcolor='rgba(255,255,255,0.9)',bordercolor='#e2e8f0',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
+            legend=dict(bgcolor='rgba(15,23,42,0.8)',bordercolor='#334155',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
             xaxis=dict(gridcolor=PLOTLY_GRID,tickfont=dict(color=PLOTLY_AXIS,size=10),tickangle=-45),
             yaxis=dict(gridcolor=PLOTLY_GRID,tickfont=dict(color=PLOTLY_AXIS,size=11),title=dict(text='L/100km',font=dict(color=PLOTLY_AXIS))),
             height=450,margin=dict(l=10,r=10,t=50,b=60),hovermode='x unified')
@@ -1060,8 +1064,8 @@ elif pg == "Análisis por Patente":
     with col_logo3: st.image(LOGO_URL, width=130)
     with col_title3:
         st.markdown(f"""<div style='padding:8px 0;'>
-        <div style='font-size:1.6rem;font-weight:800;color:#0f172a;'>Análisis por Patente — {anio_sel}</div>
-        <div style='font-size:.9rem;color:#64748b;margin-top:4px;'>Consumo · IER v6 · Excesos · Promedios</div>
+        <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>Análisis por Patente — {anio_sel}</div>
+        <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Consumo · IER v6 · Excesos · Promedios</div>
         </div>""", unsafe_allow_html=True)
     if df.empty or 'DOMINIO' not in df.columns: st.warning('Sin datos.'); st.stop()
     resumen=df.groupby('DOMINIO').agg(LITROS_TOTAL=('LITROS','sum'),KM_TOTAL=('KM','sum'),MESES=('MES_PERIODO','nunique')).reset_index()
@@ -1083,11 +1087,11 @@ elif pg == "Análisis por Patente":
         st.markdown(f'<div class="highlight-min"><b>🟢 Menor consumo — {patente_min["DOMINIO"]}</b> ({patente_min["MODELO"]})<br>Prom: <b>{patente_min["L100KM_PROM"]:.2f} L/100km</b> | Total: <b>{patente_min["LITROS_TOTAL"]:,.0f} L</b> | {patente_min["KM_TOTAL"]:,.0f} km</div>', unsafe_allow_html=True)
     st.divider()
     st.markdown(f'<div class="sec-title">Promedio L/100km por Patente — {anio_sel}</div>', unsafe_allow_html=True)
-    colors_bar=[('#dc2626' if r['DOMINIO']==patente_max['DOMINIO'] else ('#16a34a' if r['DOMINIO']==patente_min['DOMINIO'] else '#3b82f6')) for _,r in resumen.iterrows()]
+    colors_bar=[('#ef4444' if r['DOMINIO']==patente_max['DOMINIO'] else ('#22c55e' if r['DOMINIO']==patente_min['DOMINIO'] else '#3b82f6')) for _,r in resumen.iterrows()]
     fig_bar=go.Figure([go.Bar(x=resumen['DOMINIO'],y=resumen['L100KM_PROM'],marker_color=colors_bar,
         text=resumen['L100KM_PROM'].apply(lambda v:f'{v:.1f}'),textposition='outside',textfont=dict(color=PLOTLY_FONT,size=10))])
     promedio_flota=resumen['L100KM_PROM'].mean()
-    fig_bar.add_hline(y=promedio_flota,line_dash='dot',line_color='#d97706',line_width=2,annotation_text=f'Prom: {promedio_flota:.2f}',annotation_font_color='#92400e')
+    fig_bar.add_hline(y=promedio_flota,line_dash='dot',line_color='#f59e0b',line_width=2,annotation_text=f'Prom: {promedio_flota:.2f}',annotation_font_color='#fbbf24')
     layout_light(fig_bar,
         xaxis=dict(gridcolor=PLOTLY_GRID,tickfont=dict(color=PLOTLY_AXIS,size=10),tickangle=-45),
         yaxis=dict(gridcolor=PLOTLY_GRID,tickfont=dict(color=PLOTLY_AXIS),title=dict(text='L/100km',font=dict(color=PLOTLY_AXIS))),
@@ -1110,7 +1114,7 @@ elif pg == "Análisis por Patente":
                     except: row_text.append('')
                 text_vals.append(row_text)
             fig_heat=go.Figure(go.Heatmap(z=z_vals,x=x_vals,y=y_vals,text=text_vals,texttemplate='%{text}',
-                colorscale=[[0.0,'#f0fdf4'],[0.35,'#16a34a'],[0.65,'#d97706'],[1.0,'#7f1d1d']],
+                colorscale=[[0.0,'#f0fdf4'],[0.35,'#22c55e'],[0.65,'#f59e0b'],[1.0,'#7f1d1d']],
                 colorbar=dict(title=dict(text='L/100km',font=dict(color=PLOTLY_AXIS)),tickfont=dict(color=PLOTLY_AXIS),bgcolor='rgba(0,0,0,0)')))
             layout_light(fig_heat,
                 xaxis=dict(tickfont=dict(color=PLOTLY_AXIS,size=10),tickangle=-45,side='bottom'),
@@ -1133,13 +1137,13 @@ elif pg == "Análisis por Patente":
             pk4.metric('L/100km promedio',f'{l100_prom_pat:.2f}'); pk5.metric('Litros totales',f'{lts_total_pat:,.0f}')
             fig_pat=go.Figure()
             fig_pat.add_trace(go.Bar(x=df_pat_mes['MES_STR'],y=df_pat_mes['LITROS'],name='Litros',marker_color='rgba(59,130,246,0.5)',yaxis='y2'))
-            fig_pat.add_trace(go.Scatter(x=df_pat_mes['MES_STR'],y=df_pat_mes['L100'],name='L/100km',mode='lines+markers',line=dict(color='#dc2626',width=2.5),marker=dict(size=8,color='#dc2626')))
-            fig_pat.add_hline(y=l100_prom_pat,line_dash='dot',line_color='#d97706',annotation_text=f'Prom: {l100_prom_pat:.2f}',annotation_font_color='#92400e')
+            fig_pat.add_trace(go.Scatter(x=df_pat_mes['MES_STR'],y=df_pat_mes['L100'],name='L/100km',mode='lines+markers',line=dict(color='#ef4444',width=2.5),marker=dict(size=8,color='#ef4444')))
+            fig_pat.add_hline(y=l100_prom_pat,line_dash='dot',line_color='#f59e0b',annotation_text=f'Prom: {l100_prom_pat:.2f}',annotation_font_color='#fbbf24')
             layout_light(fig_pat,
                 xaxis=dict(gridcolor=PLOTLY_GRID,tickfont=dict(color=PLOTLY_AXIS,size=10),tickangle=-30),
-                yaxis=dict(gridcolor=PLOTLY_GRID,tickfont=dict(color=PLOTLY_AXIS),title=dict(text='L/100km',font=dict(color='#dc2626'))),
+                yaxis=dict(gridcolor=PLOTLY_GRID,tickfont=dict(color=PLOTLY_AXIS),title=dict(text='L/100km',font=dict(color='#ef4444'))),
                 yaxis2=dict(overlaying='y',side='right',tickfont=dict(color='#3b82f6'),title=dict(text='Litros',font=dict(color='#3b82f6')),showgrid=False),
-                legend=dict(bgcolor='rgba(255,255,255,0.9)',bordercolor='#e2e8f0',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
+                legend=dict(bgcolor='rgba(15,23,42,0.8)',bordercolor='#334155',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
                 height=370,margin=dict(l=10,r=50,t=40,b=50))
             st.plotly_chart(fig_pat, use_container_width=True)
     st.divider()
@@ -1161,8 +1165,8 @@ elif pg == "Datos Operativos":
     with col_logo4: st.image(LOGO_URL, width=130)
     with col_title4:
         st.markdown(f"""<div style='padding:8px 0;'>
-        <div style='font-size:1.6rem;font-weight:800;color:#0f172a;'>Datos Operativos — {anio_sel}</div>
-        <div style='font-size:.9rem;color:#64748b;margin-top:4px;'>Peso entregado · Ton·km/L</div>
+        <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>Datos Operativos — {anio_sel}</div>
+        <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Peso entregado · Ton·km/L</div>
         </div>""", unsafe_allow_html=True)
     if df_carga_raw is None or df_carga_raw.empty:
         st.warning('⚠️ No hay datos de carga.'); st.stop()
@@ -1194,7 +1198,7 @@ elif pg == "Datos Operativos":
         z_vals=pivot_carga[meses_cols].values.tolist(); y_vals=pivot_carga['DOMINIO'].tolist()
         txt_vals=[[f'{v:,.1f}' if v>0 else '' for v in row] for row in z_vals]
         fig_heat_c=go.Figure(go.Heatmap(z=z_vals,x=meses_cols,y=y_vals,text=txt_vals,texttemplate='%{text}',
-            colorscale=[[0.0,'#f8fafc'],[0.3,'#3b82f6'],[0.65,'#8b5cf6'],[1.0,'#be185d']],
+            colorscale=[[0.0,'#f8fafc'],[0.3,'#3b82f6'],[0.65,'#a78bfa'],[1.0,'#be185d']],
             colorbar=dict(title=dict(text='Ton',font=dict(color=PLOTLY_AXIS)),tickfont=dict(color=PLOTLY_AXIS),bgcolor='rgba(0,0,0,0)')))
         layout_light(fig_heat_c,
             xaxis=dict(tickfont=dict(color=PLOTLY_AXIS,size=10),tickangle=-45,side='bottom'),
@@ -1209,7 +1213,7 @@ elif pg == "Datos Operativos":
     tonkml_mes['PESO_TON']=tonkml_mes['PESO_TON'].fillna(0)
     tonkml_mes['TONKML']=np.where((tonkml_mes['PESO_TON']>0)&(tonkml_mes['LITROS']>0),(tonkml_mes['PESO_TON']*tonkml_mes['KM'])/tonkml_mes['LITROS'],np.nan).round(2)
     tonkml_mes['MODELO']=tonkml_mes['DOMINIO'].apply(asignar_modelo)
-    COLORES_PAT=['#3b82f6','#ea580c','#16a34a','#9333ea','#dc2626','#0891b2','#ca8a04','#65a30d']
+    COLORES_PAT=['#3b82f6','#f97316','#22c55e','#a855f7','#ef4444','#06b6d4','#eab308','#84cc16']
     fig_tkml=go.Figure()
     for i,dom in enumerate(tonkml_mes['DOMINIO'].unique()):
         sub=tonkml_mes[tonkml_mes['DOMINIO']==dom].sort_values('MES_STR')
@@ -1219,7 +1223,7 @@ elif pg == "Datos Operativos":
     layout_light(fig_tkml,
         xaxis=dict(gridcolor=PLOTLY_GRID,tickfont=dict(color=PLOTLY_AXIS,size=10),tickangle=-30),
         yaxis=dict(gridcolor=PLOTLY_GRID,tickfont=dict(color=PLOTLY_AXIS),title=dict(text='ton·km/L',font=dict(color=PLOTLY_AXIS))),
-        legend=dict(bgcolor='rgba(255,255,255,0.9)',bordercolor='#e2e8f0',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
+        legend=dict(bgcolor='rgba(15,23,42,0.8)',bordercolor='#334155',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
         height=400,margin=dict(l=10,r=10,t=50,b=50))
     st.plotly_chart(fig_tkml, use_container_width=True)
     st.caption(f'BI Expreso · Año {anio_sel}')
