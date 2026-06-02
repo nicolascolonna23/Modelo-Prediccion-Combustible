@@ -12,13 +12,11 @@ from sklearn.preprocessing import PolynomialFeatures
 import plotly.graph_objects as go
 import warnings
 warnings.filterwarnings('ignore')
-
 st.set_page_config(
     page_title="Expreso Diemar — Predicción Combustible",
     page_icon="🚛",
     layout="wide",
 )
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  CONFIG: URLs DE FUENTES DE DATOS — editá acá si cambian
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -26,20 +24,16 @@ LOGO_URL     = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Predic
 IVECO_URL    = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/S-Way-6x2-1.webp"
 SCANIA_URL   = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/2016p.png"
 STRALIS_URL  = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/image.png"
-
 SWAY_PATENTES   = ['AH522SI', 'AH862UB', 'AH938VO', 'AH842GQ']
 SCANIA_PATENTES = ['AD247MQ', 'AE423IW']
 LIMITE_VELOCIDAD = 88
-
 # Telemetría
 BASE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR35NkYPtJrOrdYHLGUH7GIW93s5cPAqQ0zEk5fP1c3gvErwbUW7HJ2OeWBYaBVsYKVmCf0yhLvs6eG/pub?output=csv"
 URL_TEL  = f"{BASE_URL}&gid=0"
 URL_UNID = f"{BASE_URL}&gid=882343299"
 URL_VEL  = f"{BASE_URL}&gid=1563993963"
-
 # Carga
 CARGA_URL = "http://bi.sistemaexpreso.com.ar/reporte_hojas.xlsx"
-
 # ── DATOS MANEJO — URL NUEVA ────────────────────────────────────────────────
 # Si publicaste "TODO el documento" con esta URL, agregás &gid=X por pestaña.
 MANEJO_BASE_NEW = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTcHu-R2zmk-j1QJ_Bu3WnZ5V8OvATxKppcAZPfUtmNamrKBkHkmFVBi2PYsIoadPJH3rTtAEkm50OS/pub?output=csv"
@@ -48,12 +42,10 @@ MANEJO_SHEETS = [
     {"gid": "738544003",  "modelo": "S-Way"},
     {"gid": "2022308308", "modelo": "Scania"},
 ]
-
 # ── REPARACIONES — gviz/tq funciona con hoja solo compartida (no requiere publicar) ──
 REP_SHEET_ID = "1u7cckay0IJ60bfoKk2OZo-TjCvTbH9O1wKxNFdSKDCQ"
 REP_GID      = "33208473"
 REP_URL      = f"https://docs.google.com/spreadsheets/d/{REP_SHEET_ID}/gviz/tq?tqx=out:csv&gid={REP_GID}&sheet=GASTOS%20REPARACIONES"
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  CSS DARK THEME
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -142,14 +134,12 @@ section[data-testid="stMain"] { background: #0f172a; }
 }
 </style>
 """
-
 # Plotly: paleta dark
 PLOTLY_BG      = 'rgba(0,0,0,0)'
 PLOTLY_GRID    = '#1e293b'
 PLOTLY_FONT    = '#e2e8f0'
 PLOTLY_AXIS    = '#94a3b8'
 PLOTLY_SUBTLE  = '#64748b'
-
 pg = st.sidebar.radio(
     "Navegacion",
     ["Dashboard Principal", "Modelo Predictivo", "Análisis por Patente", "Datos Operativos", "🔧 Diagnóstico"],
@@ -158,7 +148,6 @@ pg = st.sidebar.radio(
 )
 st.sidebar.markdown("---")
 st.sidebar.image(LOGO_URL, width=160)
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  LOADERS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -224,7 +213,6 @@ def cargar_datos():
     except Exception as e:
         st.error(f"Error cargando datos: {e}")
         return pd.DataFrame(), pd.DataFrame()
-
 @st.cache_data(ttl=600)
 def cargar_velocidad():
     try:
@@ -263,7 +251,6 @@ def cargar_velocidad():
         return df[keep].dropna(subset=["DOMINIO","FECHA"]).reset_index(drop=True)
     except Exception:
         return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH"])
-
 @st.cache_data(ttl=3600)
 def cargar_carga():
     try:
@@ -293,7 +280,6 @@ def cargar_carga():
                   .reset_index())
     except Exception:
         return pd.DataFrame()
-
 @st.cache_data(ttl=3600)
 def cargar_viajes_todos():
     try:
@@ -322,7 +308,6 @@ def cargar_viajes_todos():
         return df[['DOMINIO','MES','PESO_TON','CON_CARGA']].reset_index(drop=True)
     except Exception:
         return pd.DataFrame()
-
 @st.cache_data(ttl=600)
 def cargar_datos_manejo():
     """Lee SCORE GENERAL de las 3 hojas raw (Stralis, S-Way, Scania)."""
@@ -362,7 +347,6 @@ def cargar_datos_manejo():
     out['SCORE_CONDUCCION'] = pd.to_numeric(out['SCORE_CONDUCCION'], errors='coerce')
     out = out[out['MES'].notna() & (out['DOMINIO'].str.len() > 2) & out['SCORE_CONDUCCION'].notna()]
     return out[['DOMINIO','MES','SCORE_CONDUCCION']].reset_index(drop=True), diagnostico
-
 @st.cache_data(ttl=600)
 def cargar_reparaciones():
     """Lee hoja gastos reparaciones. Col A=Periodo (MM/YYYY), B=Patente, C=Monto."""
@@ -406,7 +390,6 @@ def cargar_reparaciones():
     except Exception as e:
         diag['err'] = str(e)[:200]
         return pd.DataFrame(), diag
-
 @st.cache_data(ttl=3600)
 def obtener_precio_gasoil():
     try:
@@ -443,13 +426,11 @@ def obtener_precio_gasoil():
     except Exception:
         pass
     return 2300.0, "referencia estimada"
-
 def asignar_modelo(dominio):
     d = str(dominio).strip().upper()
     if d in SWAY_PATENTES:   return 'S-Way'
     if d in SCANIA_PATENTES: return 'Scania'
     return 'Stralis'
-
 def calcular_score_zscore(series, higher_is_better=True, k=0.4, min_sigma_pct=0.05):
     series = pd.to_numeric(series, errors='coerce')
     if series.dropna().count() <= 1:
@@ -467,7 +448,6 @@ def calcular_score_zscore(series, higher_is_better=True, k=0.4, min_sigma_pct=0.
         z = -z
     scores = 1.0 + 1.5 * np.tanh(k * z)
     return scores.clip(0.4, 2.5).fillna(1.0)
-
 def calcular_ier_chofer(df, df_vel=None, df_manejo=None):
     if 'DOMINIO' not in df.columns or df.empty:
         return pd.DataFrame()
@@ -534,7 +514,6 @@ def calcular_ier_chofer(df, df_vel=None, df_manejo=None):
                 'EXCESOS','SEVERIDAD','SEVERIDAD_MOD','VEL_MAX','KM',
                 'SCORE_CONDUCCION','SCORE_MANEJO_MOD','TIENE_MANEJO',
                 'SCORE_CONSUMO','SCORE_MANEJO','SCORE_VEL']].sort_values('IER', ascending=False).reset_index(drop=True)
-
 def calcular_ier(df, df_vel=None, df_carga=None):
     if 'DOMINIO' not in df.columns or df.empty:
         return pd.DataFrame()
@@ -628,7 +607,6 @@ def calcular_ier(df, df_vel=None, df_carga=None):
             'SCORE_CONSUMO','SCORE_KM','SCORE_VEL','SCORE_RAL']
     if 'MESES' in agg.columns: keep.append('MESES')
     return agg[keep].sort_values('IER', ascending=False).reset_index(drop=True)
-
 with st.spinner('Cargando datos...'):
     df_raw, df_unid       = cargar_datos()
     df_vel_raw            = cargar_velocidad()
@@ -636,18 +614,14 @@ with st.spinner('Cargando datos...'):
     df_viajes_raw         = cargar_viajes_todos()
     df_rep_raw, rep_diag  = cargar_reparaciones()
     df_manejo_raw, manejo_diag = cargar_datos_manejo()
-
 if df_raw.empty:
     st.warning('No se pudieron cargar datos.')
     st.stop()
-
 precio_gasoil, precio_fuente = obtener_precio_gasoil()
 st.markdown(LIGHT_CSS, unsafe_allow_html=True)
-
 if 'DOMINIO' in df_raw.columns:
     df_raw['MODELO'] = df_raw['DOMINIO'].apply(asignar_modelo)
 df_full = df_raw.copy()
-
 anios_disponibles = (sorted(df_full['FECHA'].dt.year.dropna().unique().tolist(), reverse=True)
                      if 'FECHA' in df_full.columns else [2025])
 anio_sel = st.sidebar.selectbox('Año de visualización', anios_disponibles, index=0)
@@ -657,12 +631,10 @@ if not df_vel_raw.empty and 'FECHA' in df_vel_raw.columns:
     df_vel_anio = df_vel_raw[df_vel_raw['FECHA'].dt.year==anio_sel].copy()
 else:
     df_vel_anio = df_vel_raw.copy()
-
 # Inicializar valores por defecto para filtros
 desde_periodo = None
 hasta_periodo = None
 patentes_sel = []
-
 if 'FECHA' in df.columns and df['FECHA'].notna().any():
     st.sidebar.markdown("---")
     st.sidebar.markdown('<div class="sidebar-filter-header">🔍 Filtros</div>', unsafe_allow_html=True)
@@ -680,16 +652,13 @@ if 'FECHA' in df.columns and df['FECHA'].notna().any():
     patentes_sel  = st.sidebar.multiselect('Patente', patentes_disp, default=[], placeholder="Todas las patentes")
     if marcas_sel   and 'MARCA'   in df.columns: df = df[df['MARCA'].isin(marcas_sel)]
     if patentes_sel and 'DOMINIO' in df.columns: df = df[df['DOMINIO'].isin(patentes_sel)]
-
 if df.empty:
     st.warning(f'Sin datos para {anio_sel} con los filtros seleccionados.')
     st.stop()
-
 df['MES_PERIODO'] = df['FECHA'].dt.to_period('M')
 df['MES_NUM']     = df['FECHA'].dt.month
 meses_df = df.groupby('MES_PERIODO').agg(LITROS=('LITROS','sum'),KM=('KM','sum')).reset_index().sort_values('MES_PERIODO')
 meses_df['L100'] = (meses_df['LITROS']/meses_df['KM'].replace(0,np.nan)*100).round(2)
-
 ralenti_total = df['RALENTI'].sum() if 'RALENTI' in df.columns else 0
 ralenti_delta_txt = ''
 if 'RALENTI' in df.columns and 'MES_PERIODO' in df.columns:
@@ -700,14 +669,12 @@ if 'RALENTI' in df.columns and 'MES_PERIODO' in df.columns:
         _pct_prev=_prev['_RAL']/_prev['_LTS']*100 if _prev['_LTS']>0 else 0
         _dr=_pct_curr-_pct_prev
         ralenti_delta_txt=f"{'▲' if _dr>0 else '▼'} {abs(_dr):.1f}pp vs mes ant."
-
 df_full_clean = df_full[df_full['FECHA'].notna()&(df_full['KM']>0)].copy()
 df_full_clean['MES_PERIODO'] = df_full_clean['FECHA'].dt.to_period('M')
 meses_hist_full = df_full_clean.groupby('MES_PERIODO').agg(LITROS=('LITROS','sum'),KM=('KM','sum')).reset_index().sort_values('MES_PERIODO')
 meses_hist_full['L100'] = (meses_hist_full['LITROS']/meses_hist_full['KM'].replace(0,np.nan)*100).round(2)
 meses_hist_full = meses_hist_full[meses_hist_full['KM']>0].copy()
 n_meses_entrenamiento = len(meses_hist_full)
-
 if not df.empty and not df_vel_anio.empty and 'FECHA' in df_vel_anio.columns:
     _mes_min = df['FECHA'].dropna().dt.to_period('M').min()
     _mes_max = df['FECHA'].dropna().dt.to_period('M').max()
@@ -715,12 +682,10 @@ if not df.empty and not df_vel_anio.empty and 'FECHA' in df_vel_anio.columns:
     df_vel_filtrado = df_vel_anio[(_vel_periodos>=_mes_min)&(_vel_periodos<=_mes_max)&(df_vel_anio['DOMINIO'].isin(df['DOMINIO'].unique()))].copy()
 else:
     df_vel_filtrado = df_vel_anio.copy()
-
 df_ier        = calcular_ier(df, df_vel_filtrado, df_carga=df_carga_raw)
 df_ier_chofer = calcular_ier_chofer(df, df_vel_filtrado, df_manejo_raw)
 total_excesos  = len(df_vel_filtrado) if not df_vel_filtrado.empty else 0
 vel_max_global = (df_vel_filtrado['VELOCIDAD'].max() if not df_vel_filtrado.empty and 'VELOCIDAD' in df_vel_filtrado.columns else 0)
-
 # Helper para layouts plotly dark
 def layout_light(fig, **kwargs):
     fig.update_layout(
@@ -730,7 +695,6 @@ def layout_light(fig, **kwargs):
         **kwargs
     )
     return fig
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  PESTAÑA DIAGNÓSTICO
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -738,7 +702,6 @@ if pg == "🔧 Diagnóstico":
     st.markdown('# 🔧 Diagnóstico de Fuentes de Datos')
     st.markdown(f'**Fecha:** `{pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")}`')
     st.divider()
-
     st.markdown('## 📊 Datos Manejo (Score Conducción)')
     st.markdown(f'**URL base:** `{MANEJO_BASE_NEW}`')
     for d in manejo_diag:
@@ -752,7 +715,6 @@ if pg == "🔧 Diagnóstico":
         st.success(f'✅ {len(df_manejo_raw)} registros cargados · {df_manejo_raw["DOMINIO"].nunique()} patentes únicas')
         with st.expander('Ver muestra de datos manejo'):
             st.dataframe(df_manejo_raw.head(20), use_container_width=True)
-
     st.divider()
     st.markdown('## 🔧 Reparaciones')
     st.markdown(f'**URL:** `{rep_diag["url"]}`')
@@ -770,7 +732,6 @@ if pg == "🔧 Diagnóstico":
         - El gid `33208473` no está publicado en la URL nueva.
         - La hoja está vacía o no tiene el formato Fecha | Patente | Monto.
         - La URL apunta a otro documento.
-
         **Pasos:**
         1. Abrí el Google Sheet con la URL pub.
         2. En la pestaña de reparaciones, mirá la URL del navegador → copiá el número después de `gid=`.
@@ -780,7 +741,6 @@ if pg == "🔧 Diagnóstico":
         st.success(f'✅ {len(df_rep_raw)} registros · {df_rep_raw["DOMINIO"].nunique()} patentes · total: ${df_rep_raw["MONTO"].sum():,.0f}')
         with st.expander('Ver muestra de reparaciones'):
             st.dataframe(df_rep_raw.head(20), use_container_width=True)
-
     st.divider()
     st.markdown('## 📡 Resto de fuentes')
     st.markdown(f'<div class="diag-row">{"✅" if not df_raw.empty else "❌"} <b>Telemetría</b> · {len(df_raw)} filas · {df_raw["DOMINIO"].nunique() if not df_raw.empty else 0} patentes</div>', unsafe_allow_html=True)
@@ -788,7 +748,6 @@ if pg == "🔧 Diagnóstico":
     st.markdown(f'<div class="diag-row">{"✅" if not df_carga_raw.empty else "❌"} <b>Carga (BI)</b> · {len(df_carga_raw)} registros mensuales</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="diag-row">{"✅" if not df_viajes_raw.empty else "❌"} <b>Viajes totales</b> · {len(df_viajes_raw)} viajes</div>', unsafe_allow_html=True)
     st.stop()
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  PESTAÑA 1 — DASHBOARD PRINCIPAL
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -824,7 +783,6 @@ if pg == "Dashboard Principal":
     kpi(k5,'kpi-green','🚛 Unidades activas',f'{n_unidades}','dominios únicos')
     _ral_sub = (f'{ralenti_total:,.0f} L · {ralenti_delta_txt}' if ralenti_delta_txt else f'{ralenti_total:,.0f} L en ralentí')
     kpi(k6,'kpi-amber','⏱️ % Ralentí',f'{ralenti_pct:.1f}%',_ral_sub)
-
     # Reparaciones KPI row — respeta filtros de fecha y patente
     patentes_filtradas = df['DOMINIO'].dropna().unique().tolist() if 'DOMINIO' in df.columns else []
     if not df_rep_raw.empty and patentes_filtradas and desde_periodo is not None and hasta_periodo is not None:
@@ -853,7 +811,6 @@ if pg == "Dashboard Principal":
         kpi(k9,'','📊 Prom. por patente','—','')
         if df_rep_raw.empty:
             st.warning(f'⚠️ Reparaciones no disponibles. HTTP {rep_diag["status"]}: {rep_diag["err"]}. Andá a la pestaña **🔧 Diagnóstico** para más detalles.')
-
     st.divider()
     st.markdown(f'<div class="sec-title">Rendimiento por Modelo — {anio_sel}</div>', unsafe_allow_html=True)
     def stats_modelo(patentes_lista):
@@ -880,7 +837,6 @@ if pg == "Dashboard Principal":
             sc3.metric(f'Lts {anio_sel}', lts_fmt if s['lts']>0 else '—')
             st.caption(f"Patentes: {pats_label} | {s['kms']:,.0f} km")
     st.divider()
-
     st.markdown(f'<div class="sec-title">Ranking de Eficiencia — {anio_sel}</div>', unsafe_allow_html=True)
     rcol1,rcol2 = st.columns(2)
     def render_ranking(col,titulo,df_rank,color_fn):
@@ -903,7 +859,6 @@ if pg == "Dashboard Principal":
                        lambda i:'#22c55e' if i<=3 else ('#f59e0b' if i<=6 else '#ef4444'))
         render_ranking(rcol2,'TOP 10 menos eficientes (mayor L/100km)',base.sort_values('L100KM',ascending=False).head(10),
                        lambda i:'#ef4444' if i<=3 else ('#f59e0b' if i<=6 else '#22c55e'))
-
     st.divider()
     st.markdown(f'<div class="sec-title">📊 IER-Chofer — Lo que controla el conductor — {anio_sel}</div>', unsafe_allow_html=True)
     tiene_manejo_disp = not df_ier_chofer.empty and df_ier_chofer['TIENE_MANEJO'].any()
@@ -957,7 +912,6 @@ if pg == "Dashboard Principal":
         st.plotly_chart(fig_ch, use_container_width=True)
         if df_manejo_raw.empty:
             st.warning(f'⚠️ Score conducción no disponible. Andá a **🔧 Diagnóstico** para ver qué falla.')
-
     if not df_vel_filtrado.empty and 'DOMINIO' in df_vel_filtrado.columns:
         st.divider()
         st.markdown(f'<div class="sec-title">🚨 Ranking Severidad Velocidad >{LIMITE_VELOCIDAD} km/h — {anio_sel}</div>', unsafe_allow_html=True)
@@ -977,9 +931,7 @@ if pg == "Dashboard Principal":
             yaxis=dict(gridcolor=PLOTLY_GRID,tickfont=dict(color=PLOTLY_AXIS),title=dict(text=f'km/h acumulados sobre {LIMITE_VELOCIDAD}',font=dict(color=PLOTLY_AXIS))),
             height=380,margin=dict(l=10,r=10,t=20,b=80),showlegend=False)
         st.plotly_chart(fig_vel, use_container_width=True)
-
     st.caption(f'Datos {anio_sel}: Google Sheets Expreso Diemar | Precio: {precio_fuente}')
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  PESTAÑA 2 — MODELO PREDICTIVO
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1066,7 +1018,6 @@ elif pg == "Modelo Predictivo":
             'Costo base M$':[round(v*precio_gasoil/1e6,2) for v in pred_lts],'Costo sim M$':[round(v*precio_sim/1e6,2) for v in pred_lts],
             'Dif. M$':[round(v*(precio_sim-precio_gasoil)/1e6,2) for v in pred_lts]})
         st.dataframe(cost_df, use_container_width=True, hide_index=True)
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  PESTAÑA 3 — ANÁLISIS POR PATENTE
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1167,7 +1118,6 @@ elif pg == "Análisis por Patente":
     resumen_show['KM']=resumen_show['KM'].apply(lambda x:f'{x:,.0f}')
     resumen_show['L/Mes']=resumen_show['L/Mes'].apply(lambda x:f'{x:,.0f}')
     st.dataframe(resumen_show, use_container_width=True, hide_index=True)
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  PESTAÑA 4 — DATOS OPERATIVOS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1199,6 +1149,166 @@ elif pg == "Datos Operativos":
     kpi2(ck2,'','🚛 Patentes',f'{n_pat_con_carga}',f'de {df["DOMINIO"].nunique()}')
     kpi2(ck3,'kpi-green','📊 Prom/Patente',f'{peso_prom_pat:,.1f}','ton')
     kpi2(ck4,'kpi-amber','📅 Meses',f'{meses_con_carga}',f'{anio_sel}')
+    st.divider()
+    # ── Matriz Diagnóstico: L/100km vs kg/km ────────────────────────────────
+    st.markdown(f'<div class="sec-title">🔬 Diagnóstico de Carga — Matriz L/100km vs kg/km — {anio_sel}</div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div class="ier-info-box">
+    <b>¿Cómo leer esta matriz?</b>
+    Cada punto es una patente. Los ejes separan consumo (L/100km) y densidad de carga (kg transportados por km recorrido).<br>
+    La línea divisoria es la <b>mediana de la flota</b> en cada eje.<br>
+    <b>% viajes sin peso:</b> viajes finalizados en el sistema BI con Peso Entregado = 0 — proxy de retornos en vacío o sin registro.
+    </div>""", unsafe_allow_html=True)
+    # Construir dataset para la matriz
+    _km_pat   = df[df['KM']>0].groupby('DOMINIO')['KM'].sum().reset_index()
+    _l100_pat = df[df['L100KM']>0].groupby('DOMINIO')['L100KM'].mean().reset_index()
+    _tons_pat = df_carga_anio.groupby('DOMINIO')['PESO_TON'].sum().reset_index()
+    _mat = _km_pat.merge(_l100_pat, on='DOMINIO').merge(_tons_pat, on='DOMINIO', how='inner')
+    _mat['KG_KM']  = (_mat['PESO_TON'] * 1000 / _mat['KM']).round(2)
+    _mat['MODELO'] = _mat['DOMINIO'].apply(asignar_modelo)
+    # Viajes stats desde df_viajes_raw
+    if not df_viajes_raw.empty:
+        _vj = df_viajes_raw[
+            (df_viajes_raw['MES'].apply(lambda p: p.year) == anio_sel) &
+            (df_viajes_raw['DOMINIO'].isin(_patentes_ld))
+        ]
+        _vj_stats = _vj.groupby('DOMINIO').agg(
+            N_TOTAL    =('CON_CARGA','count'),
+            N_CARGADOS =('CON_CARGA','sum')
+        ).reset_index()
+        _vj_stats['N_VACIOS']   = _vj_stats['N_TOTAL'] - _vj_stats['N_CARGADOS']
+        _vj_stats['PCT_VACIOS'] = (_vj_stats['N_VACIOS'] / _vj_stats['N_TOTAL'] * 100).round(1)
+        _mat = _mat.merge(_vj_stats[['DOMINIO','N_TOTAL','N_CARGADOS','N_VACIOS','PCT_VACIOS']], on='DOMINIO', how='left')
+    else:
+        _mat['N_TOTAL'] = 0; _mat['N_CARGADOS'] = 0; _mat['N_VACIOS'] = 0; _mat['PCT_VACIOS'] = 0.0
+    if not _mat.empty and len(_mat) >= 2:
+        _l100_med = _mat['L100KM'].median()
+        _kgkm_med = _mat['KG_KM'].median()
+        def _cuadrante(row):
+            bajo = row['L100KM'] <= _l100_med
+            alto  = row['KG_KM'] >= _kgkm_med
+            if   bajo and alto:  return '🟢 Ideal',         '#22c55e', 'Eficiente y bien cargado. Rendimiento óptimo.'
+            elif bajo and not alto: return '🟡 Subutilizado','#f59e0b', 'Consumo eficiente pero baja densidad de carga. Revisar asignación de rutas o retornos en vacío.'
+            elif not bajo and alto: return '🟠 Consumo alto','#f97316', 'Bien cargado pero consume en exceso para el peso transportado. Revisar mecánica o conducción.'
+            else:                   return '🔴 Crítico',     '#ef4444', 'Consumo alto y baja carga simultáneamente. Intervención urgente en mecánica y operación.'
+        _mat[['CUAD_LABEL','CUAD_COLOR','CUAD_DESC']] = pd.DataFrame(
+            _mat.apply(_cuadrante, axis=1).tolist(), index=_mat.index)
+        # Scatter plot
+        _x_min = _mat['L100KM'].min() * 0.95; _x_max = _mat['L100KM'].max() * 1.05
+        _y_min = _mat['KG_KM'].min()  * 0.90; _y_max = _mat['KG_KM'].max()  * 1.10
+        fig_mat = go.Figure()
+        # ── Fondos de cuadrante ──────────────────────────────────────────────
+        _quad_cfg = [
+            ([_x_min, _l100_med], [_kgkm_med, _y_max], 'rgba(34,197,94,0.12)',  '#22c55e', '🟢 IDEAL',
+             'Eficiente + bien cargado', _x_min, _y_max, 'top left'),
+            ([_l100_med, _x_max], [_kgkm_med, _y_max], 'rgba(249,115,22,0.12)', '#f97316', '🟠 CONSUMO ALTO',
+             'Carga OK · consumo excesivo', _x_max, _y_max, 'top right'),
+            ([_x_min, _l100_med], [_y_min, _kgkm_med], 'rgba(245,158,11,0.12)', '#f59e0b', '🟡 SUBUTILIZADO',
+             'Eficiente · poca carga/retornos vacíos', _x_min, _y_min, 'bottom left'),
+            ([_l100_med, _x_max], [_y_min, _kgkm_med], 'rgba(239,68,68,0.12)',  '#ef4444', '🔴 CRÍTICO',
+             'Consumo alto + baja carga', _x_max, _y_min, 'bottom right'),
+        ]
+        for _xr, _yr, _fc, _ec, _title, _sub, _ax, _ay, _apos in _quad_cfg:
+            fig_mat.add_shape(type='rect', x0=_xr[0], x1=_xr[1], y0=_yr[0], y1=_yr[1],
+                fillcolor=_fc, line=dict(color=_ec, width=0.5, dash='dot'), layer='below')
+            _xanchor = 'left' if 'left' in _apos else 'right'
+            _yanchor = 'top'  if 'top'  in _apos else 'bottom'
+            _pad_x   = (_x_max - _x_min) * 0.015 * (1 if _xanchor=='left' else -1)
+            _pad_y   = (_y_max - _y_min) * 0.025 * (-1 if _yanchor=='top' else 1)
+            fig_mat.add_annotation(
+                x=_ax + _pad_x, y=_ay + _pad_y,
+                text=f'<b>{_title}</b><br><span style="font-size:9px;">{_sub}</span>',
+                showarrow=False, xanchor=_xanchor, yanchor=_yanchor,
+                font=dict(size=11, color=_ec),
+                bgcolor='rgba(15,23,42,0.75)', borderpad=4
+            )
+        # ── Líneas divisorias ─────────────────────────────────────────────────
+        fig_mat.add_vline(x=_l100_med, line_dash='dash', line_color='#64748b', line_width=1.5)
+        fig_mat.add_hline(y=_kgkm_med, line_dash='dash', line_color='#64748b', line_width=1.5)
+        fig_mat.add_annotation(x=_l100_med, y=_y_max, text=f'mediana L/100km = {_l100_med:.1f}',
+            showarrow=False, yanchor='bottom', font=dict(size=9, color='#64748b'),
+            bgcolor='rgba(15,23,42,0.7)', borderpad=3)
+        fig_mat.add_annotation(x=_x_min, y=_kgkm_med, text=f'mediana kg/km = {_kgkm_med:.0f}',
+            showarrow=False, xanchor='left', font=dict(size=9, color='#64748b'),
+            bgcolor='rgba(15,23,42,0.7)', borderpad=3)
+        # ── Puntos ────────────────────────────────────────────────────────────
+        fig_mat.add_trace(go.Scatter(
+            x=_mat['L100KM'], y=_mat['KG_KM'],
+            mode='markers+text',
+            text=_mat['DOMINIO'],
+            textposition='top center',
+            textfont=dict(size=10, color='#f1f5f9', family='monospace'),
+            marker=dict(size=18, color=_mat['CUAD_COLOR'],
+                        line=dict(color='white', width=2),
+                        symbol='circle'),
+            customdata=_mat[['CUAD_LABEL','CUAD_DESC','PCT_VACIOS','N_TOTAL','N_VACIOS','MODELO','KG_KM','PESO_TON']].values,
+            hovertemplate=(
+                '<b>%{text}</b>  <i>%{customdata[5]}</i><br>'
+                '─────────────────────<br>'
+                '⛽ L/100km: <b>%{x:.2f}</b>  (mediana flota: ' + f'{_l100_med:.1f})<br>' +
+                '📦 kg/km: <b>%{y:.1f}</b>  (mediana flota: ' + f'{_kgkm_med:.0f})<br>' +
+                '⚖️ Peso total: <b>%{customdata[7]:.1f} ton</b><br>'
+                '🚫 Viajes sin peso: <b>%{customdata[4]:.0f} / %{customdata[3]:.0f} (%{customdata[2]:.1f}%)</b><br>'
+                '─────────────────────<br>'
+                '<b>%{customdata[0]}</b><br>'
+                '<i>%{customdata[1]}</i><extra></extra>'
+            ),
+            showlegend=False
+        ))
+        layout_light(fig_mat,
+            xaxis=dict(
+                gridcolor=PLOTLY_GRID, tickfont=dict(color=PLOTLY_AXIS, size=11),
+                title=dict(
+                    text='L / 100 km   —   litros consumidos por cada 100 km recorridos   (← menor = más eficiente)',
+                    font=dict(color=PLOTLY_AXIS, size=11)
+                ),
+                range=[_x_min, _x_max]
+            ),
+            yaxis=dict(
+                gridcolor=PLOTLY_GRID, tickfont=dict(color=PLOTLY_AXIS, size=11),
+                title=dict(
+                    text='kg / km   —   kg de carga entregados por km recorrido   (↑ mayor = más productivo)',
+                    font=dict(color=PLOTLY_AXIS, size=11)
+                ),
+                range=[_y_min, _y_max]
+            ),
+            height=560, margin=dict(l=70, r=50, t=40, b=70)
+        )
+        st.plotly_chart(fig_mat, use_container_width=True)
+        st.caption(f'Cada punto = una patente · Hover para diagnóstico completo · Líneas punteadas = mediana de la flota · L/100km: dato de telemetría · kg/km: carga del BI ÷ km telemetría')
+        # Cards de diagnóstico por patente
+        st.markdown('<div class="sec-title">📋 Diagnóstico Individual por Patente</div>', unsafe_allow_html=True)
+        _mat_sorted = _mat.sort_values('CUAD_COLOR', key=lambda s: s.map({'#ef4444':0,'#f97316':1,'#f59e0b':2,'#22c55e':3}))
+        _diag_cols = st.columns(min(4, len(_mat_sorted)))
+        for _i, (_, _r) in enumerate(_mat_sorted.iterrows()):
+            with _diag_cols[_i % len(_diag_cols)]:
+                _pct_v = _r.get('PCT_VACIOS', 0)
+                _n_tot = int(_r.get('N_TOTAL', 0))
+                _n_vac = int(_r.get('N_VACIOS', 0))
+                _vacios_txt = f"{_n_vac}/{_n_tot} viajes sin peso ({_pct_v:.0f}%)" if _n_tot > 0 else "sin datos de viajes"
+                _bc = _r['CUAD_COLOR']
+                st.markdown(f"""
+                <div style="background:#1e293b;border-radius:12px;padding:16px;border-left:5px solid {_bc};margin-bottom:12px;">
+                  <div style="font-size:.95rem;font-weight:800;color:#f1f5f9;">{_r['DOMINIO']}</div>
+                  <div style="font-size:.72rem;color:#64748b;margin-bottom:8px;">{_r['MODELO']}</div>
+                  <div style="font-size:1.2rem;font-weight:700;color:{_bc};margin-bottom:6px;">{_r['CUAD_LABEL']}</div>
+                  <div style="font-size:.75rem;color:#94a3b8;line-height:1.5;">
+                    L/100km: <b style="color:#f1f5f9;">{_r['L100KM']:.2f}</b><br>
+                    kg/km: <b style="color:#f1f5f9;">{_r['KG_KM']:.1f}</b><br>
+                    Viajes sin peso: <b style="color:#fbbf24;">{_vacios_txt}</b>
+                  </div>
+                  <div style="font-size:.72rem;color:#94a3b8;margin-top:8px;font-style:italic;">{_r['CUAD_DESC']}</div>
+                </div>""", unsafe_allow_html=True)
+        # Tabla resumen
+        with st.expander('📋 Ver tabla completa diagnóstico'):
+            _tbl = _mat[['DOMINIO','MODELO','L100KM','KG_KM','PESO_TON','N_TOTAL','N_CARGADOS','N_VACIOS','PCT_VACIOS','CUAD_LABEL']].copy()
+            _tbl.columns = ['Patente','Modelo','L/100km','kg/km','Peso total (ton)','Viajes total','Con carga','Sin carga','% sin carga','Cuadrante']
+            _tbl['L/100km']         = _tbl['L/100km'].round(2)
+            _tbl['kg/km']           = _tbl['kg/km'].round(1)
+            _tbl['Peso total (ton)'] = _tbl['Peso total (ton)'].round(1)
+            st.dataframe(_tbl.sort_values('% sin carga', ascending=False), use_container_width=True, hide_index=True)
+    else:
+        st.info('Sin datos suficientes para armar la matriz (se necesitan datos de telemetría y carga simultáneos).')
     st.divider()
     st.markdown(f'<div class="sec-title">📦 Peso por Mes y Patente</div>', unsafe_allow_html=True)
     pivot_carga=(df_carga_anio.pivot_table(index='DOMINIO',columns='MES_STR',values='PESO_TON',aggfunc='sum',fill_value=0).reset_index())
