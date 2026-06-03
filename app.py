@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 #  EXPRESO DIEMAR — Dashboard de Monitoreo de Flota v4 (LIGHT THEME)
-#  IER v6: Z-Score + Tanh
+#  IER v6.5: Z-Score + Tanh (Eficiencia Productiva: ton·km/L)
 # ═══════════════════════════════════════════════════════════════════════════════
 import pandas as pd
 import streamlit as st
@@ -462,13 +462,29 @@ def calcular_score_zscore(series, higher_is_better=True, k=0.4, min_sigma_pct=0.
     scores = 1.0 + 1.5 * np.tanh(k * z)
     return scores.clip(0.4, 2.5).fillna(1.0)
 
-def calcular_ier_chofer(df, df_vel=None, df_manejo=None):
+def calcular_ier_chofer(df, df_vel=None, df_manejo=None, df_carga=None):
     if 'DOMINIO' not in df.columns or df.empty:
         return pd.DataFrame()
     df_c = df[df['L100KM'] > 0].copy()
     if df_c.empty:
         return pd.DataFrame()
     agg = df_c.groupby('DOMINIO').agg(L100KM=('L100KM','mean'), KM=('KM','sum'), LITROS=('LITROS','sum')).reset_index()
+    
+    # ── AGREGAR CARGA PARA CALCULAR TONKML ──
+    if df_carga is not None and not df_carga.empty and 'MES_PERIODO' in df.columns:
+        meses_activos = df['MES_PERIODO'].dropna().unique()
+        carga_periodo = df_carga[df_carga['MES'].isin(meses_activos)]
+        if not carga_periodo.empty:
+            carga_agg = carga_periodo.groupby('DOMINIO')['PESO_TON'].sum().reset_index()
+            agg = agg.merge(carga_agg, on='DOMINIO', how='left')
+            agg['PESO_TON'] = agg['PESO_TON'].fillna(0)
+        else:
+            agg['PESO_TON'] = 0.0
+    else:
+        agg['PESO_TON'] = 0.0
+        
+    agg['TONKML'] = np.where((agg['PESO_TON']>0)&(agg['LITROS']>0), (agg['PESO_TON']*agg['KM'])/agg['LITROS'], np.nan)
+
     if df_vel is not None and not df_vel.empty and 'DOMINIO' in df_vel.columns:
         vel_agg = df_vel.groupby('DOMINIO').agg(
             EXCESOS=('DOMINIO','count'),
@@ -488,20 +504,33 @@ def calcular_ier_chofer(df, df_vel=None, df_manejo=None):
         agg['SCORE_CONDUCCION'] = np.nan
     agg['TIENE_MANEJO'] = agg['SCORE_CONDUCCION'].notna()
     agg['MODELO'] = agg['DOMINIO'].apply(asignar_modelo)
+    
     def _safe_mean(x): v = x.dropna(); return v.mean() if len(v)>0 else np.nan
     modelo_avgs = agg.groupby('MODELO').agg(
         L100KM_MOD=('L100KM','mean'),
+        TONKML_MOD=('TONKML',_safe_mean),
         SEVERIDAD_MOD=('SEVERIDAD',_safe_mean),
         SCORE_MANEJO_MOD=('SCORE_CONDUCCION',_safe_mean)).reset_index()
     agg = agg.merge(modelo_avgs, on='MODELO', how='left')
+    
     agg['SCORE_CONSUMO'] = 1.0; agg['SCORE_VEL'] = 1.0; agg['SCORE_MANEJO'] = 1.0
+    
     for modelo in agg['MODELO'].unique():
         mask = agg['MODELO'] == modelo
         idx  = agg.index[mask]
         if mask.sum() == 0: continue
-        agg.loc[idx,'SCORE_CONSUMO'] = calcular_score_zscore(agg.loc[idx,'L100KM'], higher_is_better=False, k=0.4, min_sigma_pct=0.05).values
+        
+        # ── NUEVO SCORE CONSUMO BASADO EN TON·km/L ──
+        agg.loc[idx,'SCORE_CONSUMO'] = calcular_score_zscore(
+            agg.loc[idx,'TONKML'].fillna(0), 
+            higher_is_better=True, 
+            k=0.4, 
+            min_sigma_pct=0.10
+        ).values
+        
         sev_log = np.log1p(agg.loc[idx,'SEVERIDAD'].astype(float))
         agg.loc[idx,'SCORE_VEL'] = calcular_score_zscore(sev_log, higher_is_better=False, k=0.4, min_sigma_pct=0.30).values
+        
         manejo_idx = idx[agg.loc[idx,'SCORE_CONDUCCION'].notna()]
         if len(manejo_idx) > 0:
             agg.loc[manejo_idx,'SCORE_MANEJO'] = calcular_score_zscore(
@@ -527,7 +556,7 @@ def calcular_ier_chofer(df, df_vel=None, df_manejo=None):
         else:        return '🔴 Crítico'
     agg['CLASIFICACION'] = agg['IER'].apply(clasif)
     return agg[['DOMINIO','MODELO','IER','CLASIFICACION','L100KM','L100KM_MOD',
-                'EXCESOS','SEVERIDAD','SEVERIDAD_MOD','VEL_MAX','KM',
+                'EXCESOS','SEVERIDAD','SEVERIDAD_MOD','VEL_MAX','KM','TONKML','TONKML_MOD',
                 'SCORE_CONDUCCION','SCORE_MANEJO_MOD','TIENE_MANEJO',
                 'SCORE_CONSUMO','SCORE_MANEJO','SCORE_VEL']].sort_values('IER', ascending=False).reset_index(drop=True)
 
@@ -591,7 +620,15 @@ def calcular_ier(df, df_vel=None, df_carga=None):
         mask = agg['MODELO']==modelo
         idx  = agg.index[mask]
         if mask.sum()==0: continue
-        agg.loc[idx,'SCORE_CONSUMO'] = calcular_score_zscore(agg.loc[idx,'L100KM'], higher_is_better=False, k=0.4, min_sigma_pct=0.05).values
+        
+        # ── NUEVO SCORE CONSUMO BASADO EN TON·km/L ──
+        agg.loc[idx,'SCORE_CONSUMO'] = calcular_score_zscore(
+            agg.loc[idx,'TONKML'].fillna(0), 
+            higher_is_better=True, 
+            k=0.4, 
+            min_sigma_pct=0.10
+        ).values
+        
         agg.loc[idx,'SCORE_KM'] = calcular_score_zscore(agg.loc[idx,'KM'], higher_is_better=True, k=0.4, min_sigma_pct=0.05).values
         sev_log = np.log1p(agg.loc[idx,'SEVERIDAD'].astype(float))
         agg.loc[idx,'SCORE_VEL'] = calcular_score_zscore(sev_log, higher_is_better=False, k=0.4, min_sigma_pct=0.30).values
@@ -718,7 +755,7 @@ else:
     df_manejo_filtrado = df_manejo_raw.copy()
 
 df_ier        = calcular_ier(df, df_vel_filtrado, df_carga=df_carga_raw)
-df_ier_chofer = calcular_ier_chofer(df, df_vel_filtrado, df_manejo_filtrado)
+df_ier_chofer = calcular_ier_chofer(df, df_vel_filtrado, df_manejo_filtrado, df_carga=df_carga_raw)
 
 total_excesos  = len(df_vel_filtrado) if not df_vel_filtrado.empty else 0
 vel_max_global = (df_vel_filtrado['VELOCIDAD'].max() if not df_vel_filtrado.empty and 'VELOCIDAD' in df_vel_filtrado.columns else 0)
@@ -907,9 +944,9 @@ if pg == "Dashboard Principal":
     pond_manejo = ('' if tiene_manejo_disp else '⚠️ sin datos este período')
 
     st.markdown(f"""<div class="ier-info-box">
-    <b>¿Qué mide?</b> Solo factores que el chofer controla: consumo, estilo de conducción y velocidad.<br>
-    <b>Ponderación:</b> <b>50%</b> L/100km &nbsp;·&nbsp; <b>40%</b> Score conducción {pond_manejo} &nbsp;·&nbsp; <b>10%</b> Severidad velocidad<br>
-    <b>Severidad velocidad:</b> km/h acumulados sobre {LIMITE_VELOCIDAD} km/h.<br>
+    <b>¿Qué mide?</b> Eficiencia productiva, estilo de conducción y velocidad.<br>
+    <b>Ponderación:</b> <b>50%</b> Eficiencia (ton·km/L) &nbsp;·&nbsp; <b>40%</b> Score conducción {pond_manejo} &nbsp;·&nbsp; <b>10%</b> Severidad velocidad<br>
+    <b>Eficiencia (ton·km/L):</b> Premia mover carga gastando menos. Reemplaza al clásico L/100km para no castigar a los camiones que van pesados.<br>
     <b>Escala:</b>&nbsp;🟢 Eficiente ≥105 &nbsp;·&nbsp; 🟡 Normal 95–105 &nbsp;·&nbsp; 🟠 Atención 85–95 &nbsp;·&nbsp; 🔴 Crítico &lt;85
     </div>""", unsafe_allow_html=True)
 
@@ -941,7 +978,7 @@ if pg == "Dashboard Principal":
                 sc_m = row.get('SCORE_CONDUCCION', np.nan)
                 sc_m_txt = f"{sc_m:.2f}/10 · score: {row['SCORE_MANEJO']:.2f}" if not np.isnan(sc_m) else "sin datos"
                 hover.append(f"<b>{row['DOMINIO']}</b> ({row['MODELO']})<br>IER-Chofer: <b>{row['IER']:.1f}</b><br>"
-                             f"L/100km: {row['L100KM']:.2f}<br>"
+                             f"ton·km/L: {row.get('TONKML',0):.2f} (L/100km: {row['L100KM']:.2f})<br>"
                              f"Score conducción: {sc_m_txt}<br>"
                              f"Severidad: {sev:.0f} km/h")
             fig_ch.add_trace(go.Bar(y=subset['DOMINIO'],x=subset['IER'],name=modelo,orientation='h',
@@ -987,7 +1024,7 @@ if pg == "Dashboard Principal":
                   <div class="best-unit-dom">{best['DOMINIO']}</div>
                   <div class="best-unit-ier">IER {best['IER']:.1f} &nbsp; {best['CLASIFICACION']}</div>
                   <div class="best-unit-stats">
-                    ⛽ L/100km: <b style="color:#f1f5f9;">{best['L100KM']:.2f}</b><br>
+                    ⚖️ ton·km/L: <b style="color:#f1f5f9;">{best.get('TONKML',0):.2f}</b> (⛽ {best['L100KM']:.2f} L/100km)<br>
                     🎯 Score conducción: <b style="color:#f1f5f9;">{sc_txt}</b><br>
                     🚦 Severidad velocidad: <b style="color:#f1f5f9;">{sev_val:.0f} km/h</b>
                   </div>
@@ -1110,7 +1147,7 @@ elif pg == "Análisis por Patente":
     with col_title3:
         st.markdown(f"""<div style='padding:8px 0;'>
         <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>Análisis por Patente — {anio_sel}</div>
-        <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Consumo · IER v6 · Excesos · Promedios</div>
+        <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Consumo · Eficiencia · Excesos · Promedios</div>
         </div>""", unsafe_allow_html=True)
     if df.empty or 'DOMINIO' not in df.columns: st.warning('Sin datos.'); st.stop()
     resumen=df.groupby('DOMINIO').agg(LITROS_TOTAL=('LITROS','sum'),KM_TOTAL=('KM','sum'),MESES=('MES_PERIODO','nunique')).reset_index()
@@ -1120,9 +1157,9 @@ elif pg == "Análisis por Patente":
     resumen['MODELO']=resumen['DOMINIO'].apply(asignar_modelo)
     
     if not df_ier.empty:
-        resumen=resumen.merge(df_ier[['DOMINIO','IER','CLASIFICACION','EXCESOS','VEL_MAX']],on='DOMINIO',how='left')
+        resumen=resumen.merge(df_ier[['DOMINIO','IER','CLASIFICACION','EXCESOS','VEL_MAX','TONKML']],on='DOMINIO',how='left')
     else:
-        resumen['IER']='—'; resumen['CLASIFICACION']='—'; resumen['EXCESOS']=0; resumen['VEL_MAX']=0
+        resumen['IER']='—'; resumen['CLASIFICACION']='—'; resumen['EXCESOS']=0; resumen['VEL_MAX']=0; resumen['TONKML']=0
         
     if not df_ier_chofer.empty:
         resumen=resumen.merge(df_ier_chofer[['DOMINIO','SCORE_CONDUCCION']],on='DOMINIO',how='left')
@@ -1150,29 +1187,6 @@ elif pg == "Análisis por Patente":
         height=420,margin=dict(l=10,r=10,t=30,b=80),showlegend=False)
     st.plotly_chart(fig_bar, use_container_width=True)
     st.divider()
-    st.markdown(f'<div class="sec-title">Consumo Mensual por Patente (L/100km) — {anio_sel}</div>', unsafe_allow_html=True)
-    if 'MES_PERIODO' in df.columns:
-        pivot=df[df['L100KM']>0].groupby(['DOMINIO','MES_PERIODO'])['L100KM'].mean().round(2).reset_index()
-        pivot['MES_STR']=pivot['MES_PERIODO'].astype(str)
-        pivot_wide=pivot.pivot(index='DOMINIO',columns='MES_STR',values='L100KM')
-        pivot_wide=pivot_wide.reindex(index=resumen['DOMINIO'].tolist()).dropna(how='all')
-        if not pivot_wide.empty:
-            z_vals=pivot_wide.values.tolist(); x_vals=list(pivot_wide.columns); y_vals=list(pivot_wide.index)
-            text_vals=[]
-            for row_data in z_vals:
-                row_text=[]
-                for v in row_data:
-                    try: row_text.append(f'{float(v):.1f}' if v is not None and not np.isnan(float(v)) else '')
-                    except: row_text.append('')
-                text_vals.append(row_text)
-            fig_heat=go.Figure(go.Heatmap(z=z_vals,x=x_vals,y=y_vals,text=text_vals,texttemplate='%{text}',
-                colorscale=[[0.0,'#f0fdf4'],[0.35,'#22c55e'],[0.65,'#f59e0b'],[1.0,'#7f1d1d']],
-                colorbar=dict(title=dict(text='L/100km',font=dict(color=PLOTLY_AXIS)),tickfont=dict(color=PLOTLY_AXIS),bgcolor='rgba(0,0,0,0)')))
-            layout_light(fig_heat,
-                xaxis=dict(tickfont=dict(color=PLOTLY_AXIS,size=10),tickangle=-45,side='bottom'),
-                yaxis=dict(tickfont=dict(color=PLOTLY_AXIS,size=10)),height=max(300,len(y_vals)*40),margin=dict(l=10,r=10,t=20,b=60))
-            st.plotly_chart(fig_heat, use_container_width=True)
-    st.divider()
     st.markdown('<div class="sec-title">🔍 Detalle Individual por Patente</div>', unsafe_allow_html=True)
     pat_sel=st.selectbox('Seleccioná patente',resumen['DOMINIO'].tolist())
     if pat_sel:
@@ -1181,38 +1195,87 @@ elif pg == "Análisis por Patente":
             df_pat_mes=df_pat.groupby('MES_PERIODO').agg(LITROS=('LITROS','sum'),KM=('KM','sum')).reset_index().sort_values('MES_PERIODO')
             df_pat_mes['L100']=(df_pat_mes['LITROS']/df_pat_mes['KM'].replace(0,np.nan)*100).round(2)
             df_pat_mes['MES_STR']=df_pat_mes['MES_PERIODO'].astype(str)
+            
+            # --- AGREGADO DE CARGA PARA LA PATENTE INDIVIDUAL ---
+            if not df_carga_raw.empty:
+                carga_pat = df_carga_raw[(df_carga_raw['DOMINIO'] == pat_sel) & (df_carga_raw['MES'].apply(lambda p: p.year) == anio_sel)].copy()
+                if not carga_pat.empty:
+                    carga_pat_agg = carga_pat.groupby('MES')['PESO_TON'].sum().reset_index()
+                    carga_pat_agg.rename(columns={'MES': 'MES_PERIODO'}, inplace=True)
+                    df_pat_mes = df_pat_mes.merge(carga_pat_agg, on='MES_PERIODO', how='left')
+                    df_pat_mes['PESO_TON'] = df_pat_mes['PESO_TON'].fillna(0)
+                else:
+                    df_pat_mes['PESO_TON'] = 0.0
+            else:
+                df_pat_mes['PESO_TON'] = 0.0
+                
+            df_pat_mes['TONKML'] = np.where((df_pat_mes['PESO_TON']>0)&(df_pat_mes['LITROS']>0), (df_pat_mes['PESO_TON']*df_pat_mes['KM'])/df_pat_mes['LITROS'], 0)
+            
             l100_prom_pat=df_pat_mes['L100'].mean(); lts_total_pat=df_pat_mes['LITROS'].sum(); kms_total_pat=df_pat_mes['KM'].sum()
             marca_pat=df_pat['MARCA'].iloc[0] if 'MARCA' in df_pat.columns else '—'
             modelo_pat=df_pat['MODELO'].iloc[0] if 'MODELO' in df_pat.columns else '—'
             
-            pk1,pk2,pk3,pk4,pk5,pk6=st.columns(6)
-            pk1.metric('Patente',pat_sel); pk2.metric('Marca',marca_pat); pk3.metric('Modelo',modelo_pat)
-            pk4.metric('L/100km promedio',f'{l100_prom_pat:.2f}'); pk5.metric('Litros totales',f'{lts_total_pat:,.0f}')
-            
+            tonkml_pat = resumen.loc[resumen['DOMINIO'] == pat_sel, 'TONKML'].values
+            tonkml_val = f"{tonkml_pat[0]:.2f}" if len(tonkml_pat) > 0 and pd.notnull(tonkml_pat[0]) else "0.00"
             score_pat = resumen.loc[resumen['DOMINIO'] == pat_sel, 'SCORE_CONDUCCION'].values
             score_val = f"{score_pat[0]:.2f}/10" if len(score_pat) > 0 and pd.notnull(score_pat[0]) else "—"
-            pk6.metric('Score Conducción', score_val)
 
-            fig_pat=go.Figure()
-            fig_pat.add_trace(go.Bar(x=df_pat_mes['MES_STR'],y=df_pat_mes['LITROS'],name='Litros',marker_color='rgba(59,130,246,0.5)',yaxis='y2'))
-            fig_pat.add_trace(go.Scatter(x=df_pat_mes['MES_STR'],y=df_pat_mes['L100'],name='L/100km',mode='lines+markers',line=dict(color='#ef4444',width=2.5),marker=dict(size=8,color='#ef4444')))
-            fig_pat.add_hline(y=l100_prom_pat,line_dash='dot',line_color='#f59e0b',annotation_text=f'Prom: {l100_prom_pat:.2f}',annotation_font_color='#fbbf24')
-            layout_light(fig_pat,
-                xaxis=dict(gridcolor=PLOTLY_GRID,tickfont=dict(color=PLOTLY_AXIS,size=10),tickangle=-30),
-                yaxis=dict(gridcolor=PLOTLY_GRID,tickfont=dict(color=PLOTLY_AXIS),title=dict(text='L/100km',font=dict(color='#ef4444'))),
-                yaxis2=dict(overlaying='y',side='right',tickfont=dict(color='#3b82f6'),title=dict(text='Litros',font=dict(color='#3b82f6')),showgrid=False),
-                legend=dict(bgcolor='rgba(15,23,42,0.8)',bordercolor='#334155',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
-                height=370,margin=dict(l=10,r=50,t=40,b=50))
-            st.plotly_chart(fig_pat, use_container_width=True)
+            dpk1, dpk2, dpk3, dpk4 = st.columns(4)
+            dpk1.metric('Patente', pat_sel)
+            dpk2.metric('Marca', marca_pat)
+            dpk3.metric('Modelo', modelo_pat)
+            dpk4.metric('Meses activos', f"{len(df_pat_mes)}")
+            
+            dpk5, dpk6, dpk7, dpk8 = st.columns(4)
+            dpk5.metric('L/100km promedio', f'{l100_prom_pat:.2f}')
+            dpk6.metric('ton·km/L prom.', tonkml_val)
+            dpk7.metric('Score Conducción', score_val)
+            dpk8.metric('Litros totales', f'{lts_total_pat:,.0f}')
+
+            st.markdown('<br><div class="sec-title">📈 Evolución: L/100km y Productividad (ton·km/L)</div>', unsafe_allow_html=True)
+            c_g1, c_g2 = st.columns(2)
+            
+            with c_g1:
+                fig_pat=go.Figure()
+                fig_pat.add_trace(go.Bar(x=df_pat_mes['MES_STR'],y=df_pat_mes['LITROS'],name='Litros',marker_color='rgba(59,130,246,0.5)',yaxis='y2'))
+                fig_pat.add_trace(go.Scatter(x=df_pat_mes['MES_STR'],y=df_pat_mes['L100'],name='L/100km',mode='lines+markers',line=dict(color='#ef4444',width=2.5),marker=dict(size=8,color='#ef4444')))
+                fig_pat.add_hline(y=l100_prom_pat,line_dash='dot',line_color='#f59e0b',annotation_text=f'Prom: {l100_prom_pat:.2f}',annotation_font_color='#fbbf24')
+                layout_light(fig_pat,
+                    xaxis=dict(gridcolor=PLOTLY_GRID,tickfont=dict(color=PLOTLY_AXIS,size=10),tickangle=-30),
+                    yaxis=dict(gridcolor=PLOTLY_GRID,tickfont=dict(color=PLOTLY_AXIS),title=dict(text='L/100km',font=dict(color='#ef4444'))),
+                    yaxis2=dict(overlaying='y',side='right',tickfont=dict(color='#3b82f6'),title=dict(text='Litros',font=dict(color='#3b82f6')),showgrid=False),
+                    legend=dict(bgcolor='rgba(15,23,42,0.8)',bordercolor='#334155',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
+                    height=370,margin=dict(l=10,r=50,t=40,b=50))
+                st.plotly_chart(fig_pat, use_container_width=True)
+
+            with c_g2:
+                fig_pat_tkml = go.Figure()
+                fig_pat_tkml.add_trace(go.Bar(x=df_pat_mes['MES_STR'], y=df_pat_mes['PESO_TON'], name='Toneladas', marker_color='rgba(168,85,247,0.5)', yaxis='y2'))
+                fig_pat_tkml.add_trace(go.Scatter(x=df_pat_mes['MES_STR'], y=df_pat_mes['TONKML'], name='ton·km/L', mode='lines+markers', line=dict(color='#22c55e',width=2.5), marker=dict(size=8,color='#22c55e')))
+                
+                tonkml_prom = df_pat_mes[df_pat_mes['TONKML']>0]['TONKML'].mean()
+                if not np.isnan(tonkml_prom):
+                    fig_pat_tkml.add_hline(y=tonkml_prom, line_dash='dot', line_color='#f59e0b', annotation_text=f'Prom: {tonkml_prom:.2f}', annotation_font_color='#fbbf24')
+                    
+                layout_light(fig_pat_tkml,
+                    xaxis=dict(gridcolor=PLOTLY_GRID,tickfont=dict(color=PLOTLY_AXIS,size=10),tickangle=-30),
+                    yaxis=dict(gridcolor=PLOTLY_GRID,tickfont=dict(color=PLOTLY_AXIS),title=dict(text='ton·km/L',font=dict(color='#22c55e'))),
+                    yaxis2=dict(overlaying='y',side='right',tickfont=dict(color='#a855f7'),title=dict(text='Toneladas',font=dict(color='#a855f7')),showgrid=False),
+                    legend=dict(bgcolor='rgba(15,23,42,0.8)',bordercolor='#334155',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
+                    height=370,margin=dict(l=10,r=50,t=40,b=50))
+                st.plotly_chart(fig_pat_tkml, use_container_width=True)
+                
     st.divider()
-    cols_show=['DOMINIO','MODELO','LITROS_TOTAL','KM_TOTAL','L100KM_PROM','LITROS_PROM_MES','MESES']
-    col_names=['Patente','Modelo','Litros','KM','L/100km','L/Mes','Meses']
+    cols_show=['DOMINIO','MODELO','LITROS_TOTAL','KM_TOTAL','L100KM_PROM','TONKML','LITROS_PROM_MES','MESES']
+    col_names=['Patente','Modelo','Litros','KM','L/100km','ton·km/L','L/Mes','Meses']
     for c,n in [('IER','IER'),('CLASIFICACION','Clasif'),('EXCESOS','Excesos'),('VEL_MAX','Vel.Max'),('SCORE_CONDUCCION','Score Cond.')]:
         if c in resumen.columns: cols_show.append(c); col_names.append(n)
     resumen_show=resumen[cols_show].copy(); resumen_show.columns=col_names
     resumen_show['Litros']=resumen_show['Litros'].apply(lambda x:f'{x:,.0f}')
     resumen_show['KM']=resumen_show['KM'].apply(lambda x:f'{x:,.0f}')
     resumen_show['L/Mes']=resumen_show['L/Mes'].apply(lambda x:f'{x:,.0f}')
+    if 'ton·km/L' in resumen_show.columns:
+        resumen_show['ton·km/L'] = resumen_show['ton·km/L'].apply(lambda x: f'{x:.2f}' if pd.notnull(x) else '—')
     if 'Score Cond.' in resumen_show.columns:
         resumen_show['Score Cond.'] = resumen_show['Score Cond.'].apply(lambda x: f'{x:.2f}' if pd.notnull(x) else '—')
     st.dataframe(resumen_show, use_container_width=True, hide_index=True)
