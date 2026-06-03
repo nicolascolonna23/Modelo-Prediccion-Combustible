@@ -172,13 +172,13 @@ def cargar_datos():
                 if   "DOMINIO"   in c or "PATENTE"  in c:              cm[c] = "DOMINIO"
                 elif "LITROS"    in c or "CONSUMID" in c:              cm[c] = "LITROS"
                 elif "DISTANCIA" in c or c == "KM" or "KILOMETR" in c: cm[c] = "KM"
-                elif "MARCA"     in c:                                  cm[c] = "MARCA"
-                elif "TAG"       in c:                                  cm[c] = "TAG"
+                elif "MARCA"     in c:                                 cm[c] = "MARCA"
+                elif "TAG"       in c:                                 cm[c] = "TAG"
                 elif "FECHA"     in c or "DATE"     in c:              cm[c] = "FECHA"
                 elif "L/100"     in c or "CONSUMO C" in c:             cm[c] = "L100KM"
-                elif "RALENT"    in c:                                  cm[c] = "RALENTI"
+                elif "RALENT"    in c:                                 cm[c] = "RALENTI"
                 elif "TIEMPO"    in c and "MOTOR"   in c:              cm[c] = "TIEMPO_MOTOR"
-                elif "EMPRESA"   in c:                                  cm[c] = "EMPRESA"
+                elif "EMPRESA"   in c:                                 cm[c] = "EMPRESA"
             df = df.rename(columns=cm).loc[:, ~df.rename(columns=cm).columns.duplicated()]
             if "DOMINIO" in df.columns:
                 df["DOMINIO"] = df["DOMINIO"].astype(str).str.strip().str.upper()
@@ -462,9 +462,6 @@ def calcular_score_zscore(series, higher_is_better=True, k=0.4, min_sigma_pct=0.
     scores = 1.0 + 1.5 * np.tanh(k * z)
     return scores.clip(0.4, 2.5).fillna(1.0)
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  CAMBIO 1: Ponderación IER-Chofer → 50% L/100km · 40% score conducción · 10% velocidad
-# ─────────────────────────────────────────────────────────────────────────────
 def calcular_ier_chofer(df, df_vel=None, df_manejo=None):
     if 'DOMINIO' not in df.columns or df.empty:
         return pd.DataFrame()
@@ -510,12 +507,10 @@ def calcular_ier_chofer(df, df_vel=None, df_manejo=None):
             agg.loc[manejo_idx,'SCORE_MANEJO'] = calcular_score_zscore(
                 agg.loc[manejo_idx,'SCORE_CONDUCCION'], higher_is_better=True, k=0.4, min_sigma_pct=0.05).values
 
-    # ── PONDERACIÓN ACTUALIZADA: 50% consumo · 40% manejo · 10% velocidad ──
     def _ier_row(r):
         if r['TIENE_MANEJO']:
             return 0.50 * r['SCORE_CONSUMO'] + 0.40 * r['SCORE_MANEJO'] + 0.10 * r['SCORE_VEL']
         else:
-            # Sin score conducción: 80% consumo · 20% velocidad
             return 0.80 * r['SCORE_CONSUMO'] + 0.20 * r['SCORE_VEL']
 
     agg['IER'] = agg.apply(_ier_row, axis=1) * 100
@@ -713,8 +708,18 @@ if not df.empty and not df_vel_anio.empty and 'FECHA' in df_vel_anio.columns:
 else:
     df_vel_filtrado = df_vel_anio.copy()
 
+if not df_manejo_raw.empty and 'MES' in df_manejo_raw.columns:
+    _manejo_periodos = df_manejo_raw['MES'].dt.to_period('M')
+    if desde_periodo is not None and hasta_periodo is not None:
+        df_manejo_filtrado = df_manejo_raw[(_manejo_periodos >= desde_periodo) & (_manejo_periodos <= hasta_periodo)].copy()
+    else:
+        df_manejo_filtrado = df_manejo_raw.copy()
+else:
+    df_manejo_filtrado = df_manejo_raw.copy()
+
 df_ier        = calcular_ier(df, df_vel_filtrado, df_carga=df_carga_raw)
-df_ier_chofer = calcular_ier_chofer(df, df_vel_filtrado, df_manejo_raw)
+df_ier_chofer = calcular_ier_chofer(df, df_vel_filtrado, df_manejo_filtrado)
+
 total_excesos  = len(df_vel_filtrado) if not df_vel_filtrado.empty else 0
 vel_max_global = (df_vel_filtrado['VELOCIDAD'].max() if not df_vel_filtrado.empty and 'VELOCIDAD' in df_vel_filtrado.columns else 0)
 
@@ -901,7 +906,6 @@ if pg == "Dashboard Principal":
     tiene_manejo_disp = not df_ier_chofer.empty and df_ier_chofer['TIENE_MANEJO'].any()
     pond_manejo = ('' if tiene_manejo_disp else '⚠️ sin datos este período')
 
-    # ── CAMBIO 2: texto de ponderación actualizado ──
     st.markdown(f"""<div class="ier-info-box">
     <b>¿Qué mide?</b> Solo factores que el chofer controla: consumo, estilo de conducción y velocidad.<br>
     <b>Ponderación:</b> <b>50%</b> L/100km &nbsp;·&nbsp; <b>40%</b> Score conducción {pond_manejo} &nbsp;·&nbsp; <b>10%</b> Severidad velocidad<br>
@@ -924,7 +928,6 @@ if pg == "Dashboard Principal":
             elif v>=85: return '#f97316'
             else: return '#ef4444'
 
-        # ── CAMBIO 3: ordenar de menor a mayor IER (peor arriba → mejor abajo) ──
         df_ch_sorted = df_ier_chofer.sort_values(['MODELO','IER'], ascending=[True, True])
 
         fig_ch=go.Figure()
@@ -959,7 +962,6 @@ if pg == "Dashboard Principal":
         if df_manejo_raw.empty:
             st.warning(f'⚠️ Score conducción no disponible. Andá a **🔧 Diagnóstico** para ver qué falla.')
 
-        # ── CAMBIO 4: Módulo — Unidad más eficiente por grupo/modelo ──
         st.markdown(f'<div class="sec-title">🏆 Unidad más eficiente por grupo — {anio_sel}</div>', unsafe_allow_html=True)
 
         modelos_presentes = df_ch_sorted['MODELO'].unique().tolist()
@@ -971,7 +973,6 @@ if pg == "Dashboard Principal":
             grupo = df_ch_sorted[df_ch_sorted['MODELO'] == modelo_b]
             if grupo.empty:
                 continue
-            # La mejor unidad = mayor IER dentro del grupo
             best = grupo.loc[grupo['IER'].idxmax()]
             badge_color = COLOR_MODELO_BADGE.get(modelo_b, '#2563eb')
             sc_val = best.get('SCORE_CONDUCCION', np.nan)
@@ -1117,10 +1118,17 @@ elif pg == "Análisis por Patente":
     resumen['LITROS_PROM_MES']=(resumen['LITROS_TOTAL']/resumen['MESES'].replace(0,np.nan)).round(0)
     resumen=resumen[resumen['KM_TOTAL']>0].sort_values('L100KM_PROM',ascending=False)
     resumen['MODELO']=resumen['DOMINIO'].apply(asignar_modelo)
+    
     if not df_ier.empty:
         resumen=resumen.merge(df_ier[['DOMINIO','IER','CLASIFICACION','EXCESOS','VEL_MAX']],on='DOMINIO',how='left')
     else:
         resumen['IER']='—'; resumen['CLASIFICACION']='—'; resumen['EXCESOS']=0; resumen['VEL_MAX']=0
+        
+    if not df_ier_chofer.empty:
+        resumen=resumen.merge(df_ier_chofer[['DOMINIO','SCORE_CONDUCCION']],on='DOMINIO',how='left')
+    else:
+        resumen['SCORE_CONDUCCION']=np.nan
+
     if resumen.empty: st.warning('Sin datos.'); st.stop()
     patente_max=resumen.iloc[0]; patente_min=resumen.iloc[-1]
     st.markdown(f'<div class="sec-title">⚡ Destacados {anio_sel}</div>', unsafe_allow_html=True)
@@ -1176,9 +1184,15 @@ elif pg == "Análisis por Patente":
             l100_prom_pat=df_pat_mes['L100'].mean(); lts_total_pat=df_pat_mes['LITROS'].sum(); kms_total_pat=df_pat_mes['KM'].sum()
             marca_pat=df_pat['MARCA'].iloc[0] if 'MARCA' in df_pat.columns else '—'
             modelo_pat=df_pat['MODELO'].iloc[0] if 'MODELO' in df_pat.columns else '—'
-            pk1,pk2,pk3,pk4,pk5=st.columns(5)
+            
+            pk1,pk2,pk3,pk4,pk5,pk6=st.columns(6)
             pk1.metric('Patente',pat_sel); pk2.metric('Marca',marca_pat); pk3.metric('Modelo',modelo_pat)
             pk4.metric('L/100km promedio',f'{l100_prom_pat:.2f}'); pk5.metric('Litros totales',f'{lts_total_pat:,.0f}')
+            
+            score_pat = resumen.loc[resumen['DOMINIO'] == pat_sel, 'SCORE_CONDUCCION'].values
+            score_val = f"{score_pat[0]:.2f}/10" if len(score_pat) > 0 and pd.notnull(score_pat[0]) else "—"
+            pk6.metric('Score Conducción', score_val)
+
             fig_pat=go.Figure()
             fig_pat.add_trace(go.Bar(x=df_pat_mes['MES_STR'],y=df_pat_mes['LITROS'],name='Litros',marker_color='rgba(59,130,246,0.5)',yaxis='y2'))
             fig_pat.add_trace(go.Scatter(x=df_pat_mes['MES_STR'],y=df_pat_mes['L100'],name='L/100km',mode='lines+markers',line=dict(color='#ef4444',width=2.5),marker=dict(size=8,color='#ef4444')))
@@ -1193,12 +1207,14 @@ elif pg == "Análisis por Patente":
     st.divider()
     cols_show=['DOMINIO','MODELO','LITROS_TOTAL','KM_TOTAL','L100KM_PROM','LITROS_PROM_MES','MESES']
     col_names=['Patente','Modelo','Litros','KM','L/100km','L/Mes','Meses']
-    for c,n in [('IER','IER'),('CLASIFICACION','Clasif'),('EXCESOS',f'Excesos'),('VEL_MAX','Vel.Max')]:
+    for c,n in [('IER','IER'),('CLASIFICACION','Clasif'),('EXCESOS','Excesos'),('VEL_MAX','Vel.Max'),('SCORE_CONDUCCION','Score Cond.')]:
         if c in resumen.columns: cols_show.append(c); col_names.append(n)
     resumen_show=resumen[cols_show].copy(); resumen_show.columns=col_names
     resumen_show['Litros']=resumen_show['Litros'].apply(lambda x:f'{x:,.0f}')
     resumen_show['KM']=resumen_show['KM'].apply(lambda x:f'{x:,.0f}')
     resumen_show['L/Mes']=resumen_show['L/Mes'].apply(lambda x:f'{x:,.0f}')
+    if 'Score Cond.' in resumen_show.columns:
+        resumen_show['Score Cond.'] = resumen_show['Score Cond.'].apply(lambda x: f'{x:.2f}' if pd.notnull(x) else '—')
     st.dataframe(resumen_show, use_container_width=True, hide_index=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
