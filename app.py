@@ -1,1070 +1,2322 @@
-# ═══════════════════════════════════════════════════════════════════════════════
-#  EXPRESO DIEMAR — Dashboard de Monitoreo de Flota v4
-#  IER v4: Z-Score + Tanh  (scoring proporcional e intra-modelo)
-# ═══════════════════════════════════════════════════════════════════════════════
-import pandas as pd
-import streamlit as st
-import numpy as np
-import requests
-from bs4 import BeautifulSoup
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import PolynomialFeatures
-import plotly.graph_objects as go
-import warnings
-warnings.filterwarnings('ignore')
-st.set_page_config(
-    page_title="Expreso Diemar — Predicción Combustible",
-    page_icon="🚛",
-    layout="wide",
-)
-LOGO_URL    = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/logo_diemar4.png"
-IVECO_URL   = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/S-Way-6x2-1.webp"
-SCANIA_URL  = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/2016p.png"
-STRALIS_URL = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/image.png"
-SWAY_PATENTES   = ['AH522SI', 'AH862UB', 'AH938VO', 'AH842GQ']
-SCANIA_PATENTES = ['AD247MQ', 'AE423IW']
-LIMITE_VELOCIDAD = 88
-BASE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR35NkYPtJrOrdYHLGUH7GIW93s5cPAqQ0zEk5fP1c3gvErwbUW7HJ2OeWBYaBVsYKVmCf0yhLvs6eG/pub?output=csv"
-GID_TEL  = "0"
-GID_VEL  = "1563993963"
-URL_TEL  = f"{BASE_URL}&gid={GID_TEL}"
-URL_VEL  = f"{BASE_URL}&gid={GID_VEL}"
-CARGA_URL = "http://bi.sistemaexpreso.com.ar/reporte_hojas.xlsx"
-DARK_CSS = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FitLife App</title>
 <style>
-[data-testid="stAppViewContainer"] { background: #0f172a; }
-[data-testid="stSidebar"] { background: #1e293b; }
-section[data-testid="stMain"] { background: #0f172a; }
-.stMarkdown, .stCaption, label, p, span, div { color: #e2e8f0 !important; }
-[data-testid="stMetricValue"] { color: #f1f5f9 !important; }
-[data-testid="stMetricDelta"] { color: #94a3b8 !important; }
-.kpi-card {
-    background: #1e293b; border-radius: 14px; padding: 24px 28px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.4); text-align: center;
-    border-left: 5px solid #2563eb; margin-bottom: 16px;
-}
-.kpi-label  { font-size:0.78rem; color:#94a3b8; font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
-.kpi-value  { font-size:2rem; font-weight:800; color:#f1f5f9; line-height:1.1; }
-.kpi-sub    { font-size:0.75rem; color:#64748b; margin-top:4px; }
-.kpi-red    { border-left-color:#ef4444; }
-.kpi-green  { border-left-color:#22c55e; }
-.kpi-amber  { border-left-color:#f59e0b; }
-.kpi-purple { border-left-color:#a855f7; }
-.sec-title {
-    font-size:1.1rem; font-weight:700; color:#e2e8f0;
-    border-left:4px solid #2563eb; padding-left:10px; margin:18px 0 10px;
-}
-.price-badge {
-    background:#292524; border:1px solid #f59e0b; border-radius:8px;
-    padding:8px 14px; display:inline-block; font-size:0.85rem; color:#fbbf24; font-weight:600;
-}
-.truck-img-box {
-    width:100%; height:280px; border-radius:12px; background:#1e293b;
-    display:flex; align-items:center; justify-content:center; overflow:hidden;
-}
-.truck-img-box img {
-    max-width:100%; max-height:100%; width:100%; height:100%;
-    object-fit:contain; object-position:center; padding:12px;
-}
-.rank-row    { display:flex; align-items:center; padding:8px 0; border-bottom:1px solid #334155; }
-.rank-num    { width:28px; font-weight:700; font-size:.9rem; color:#94a3b8; }
-.rank-dom    { flex:1; font-size:.88rem; color:#e2e8f0; font-weight:600; }
-.rank-val    { font-size:.88rem; font-weight:700; }
-.rank-bar-bg { width:80px; height:6px; background:#334155; border-radius:3px; margin:0 10px; overflow:hidden; }
-.rank-bar    { height:6px; border-radius:3px; }
-.alert-box   { background:#450a0a; border:1px solid #ef4444; border-radius:10px; padding:14px 18px; margin:10px 0; }
-.alert-ok    { background:#052e16; border:1px solid #22c55e; border-radius:10px; padding:14px 18px; margin:10px 0; }
-.highlight-max { background:#450a0a; border:1px solid #ef4444; border-radius:10px; padding:14px 18px; margin:6px 0; }
-.highlight-min { background:#052e16; border:1px solid #22c55e; border-radius:10px; padding:14px 18px; margin:6px 0; }
-.training-badge {
-    background:#1e1b4b; border:1px solid #6366f1; border-radius:8px;
-    padding:6px 12px; display:inline-block; font-size:0.8rem; color:#a5b4fc; font-weight:600;
-    margin-bottom: 12px;
-}
-.sidebar-filter-header {
-    font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px;
-    color:#64748b; margin-bottom:10px; padding:6px 0; border-bottom:1px solid #334155;
-}
-[data-testid="stSidebar"] [data-testid="stDateInput"] label,
-[data-testid="stSidebar"] [data-testid="stMultiSelect"] label {
-    font-size:.78rem !important; color:#94a3b8 !important; font-weight:600 !important;
-}
-.ier-info-box {
-    background:#0f2744; border:1px solid #2563eb; border-radius:10px;
-    padding:14px 18px; margin:10px 0; font-size:.85rem; color:#93c5fd; line-height:1.6;
-}
-.ier-method-box {
-    background:#0d1f0d; border:1px solid #16a34a; border-radius:10px;
-    padding:14px 18px; margin:10px 0; font-size:.82rem; color:#86efac; line-height:1.7;
-}
-.ier-gauge-wrap {
-    background:#1e293b; border-radius:14px; padding:18px 22px;
-    border-left:5px solid #6366f1; margin-bottom:12px; text-align:center;
-}
-.ier-score-big { font-size:2.4rem; font-weight:900; line-height:1; }
-.ier-clasif    { font-size:.85rem; font-weight:700; margin-top:4px; }
-.ier-comp-row  {
-    display:flex; align-items:center; justify-content:space-between;
-    background:#0f172a; border-radius:8px; padding:8px 14px; margin:4px 0;
-    font-size:.82rem;
-}
-.ier-comp-label { color:#94a3b8; flex:1; }
-.ier-comp-val   { font-weight:700; color:#e2e8f0; }
-.ier-comp-bar-bg { width:90px; height:6px; background:#334155; border-radius:3px; margin:0 10px; overflow:hidden; }
-.ier-comp-bar    { height:6px; border-radius:3px; }
-.vel-badge {
-    background:#2d1b00; border:1px solid #f97316; border-radius:6px;
-    padding:3px 10px; display:inline-block; font-size:.78rem; color:#fb923c; font-weight:700;
-}
-.zscore-badge {
-    background:#1e1b4b; border:1px solid #818cf8; border-radius:5px;
-    padding:2px 8px; display:inline-block; font-size:.72rem; color:#a5b4fc; font-weight:600;
-}
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;600;700&display=swap');
+
+  :root {
+    --yellow: #E8FF47;
+    --yellow-soft: #F7FFB5;
+    --yellow-dark: #C8E000;
+    --green: #1A3A2A;
+    --green-mid: #2D5A3D;
+    --green-light: #4CAF6F;
+    --green-accent: #4CAF6F;
+    --bg: #F7F8F5;
+    --bg-soft: #FFFFFF;
+    --bg-card: #FFFFFF;
+    --bg-elevated: #FAFBF7;
+    --text: #1A2A20;
+    --text-soft: #4A5A50;
+    --text-muted: #8A9890;
+    --border: #E2E8DE;
+    --border-strong: #CDD6C8;
+    --red: #E04848;
+    --blue: #4A90E2;
+    --radius: 16px;
+    --radius-sm: 10px;
+    --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    --shadow-sm: 0 2px 8px rgba(26,42,32,0.04);
+    --shadow-md: 0 6px 20px rgba(26,42,32,0.08);
+    --shadow-lg: 0 16px 40px rgba(26,42,32,0.12);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body { font-family: 'DM Sans', sans-serif; background: #DFE5DA; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; color: var(--text); }
+
+  .phone-frame { width: 390px; height: 844px; background: var(--bg); border-radius: 48px; overflow: hidden; position: relative; box-shadow: var(--shadow-lg), inset 0 0 0 2px rgba(26,42,32,0.06); }
+
+  .screen { width: 100%; height: 100%; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; position: absolute; top: 0; left: 0; display: none; flex-direction: column; background: var(--bg); }
+  .screen::-webkit-scrollbar { display: none; }
+  .screen.active { display: flex; }
+
+  /* STATUS BAR */
+  .status-bar { display: flex; justify-content: space-between; align-items: center; padding: 14px 28px 0; font-size: 13px; font-weight: 600; color: var(--text); flex-shrink: 0; }
+  .status-icons { display: flex; gap: 6px; align-items: center; }
+
+  /* STEP BREADCRUMB */
+  .step-trail { padding: 10px 24px; font-size: 11px; color: var(--text-muted); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex-shrink: 0; background: var(--bg-soft); }
+  .step-trail span.current { color: var(--green); font-weight: 700; }
+  .step-trail .sep { color: var(--border-strong); }
+
+  /* TOP NAV */
+  .top-nav { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px 0; flex-shrink: 0; }
+  .top-nav-title { font-family: 'Space Grotesk', sans-serif; font-size: 20px; font-weight: 700; color: var(--text); }
+  .back-btn { width: 36px; height: 36px; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text); font-size: 18px; transition: var(--transition); }
+  .back-btn:hover { border-color: var(--green); background: var(--bg-elevated); }
+
+  .screen-content { padding: 20px 24px; flex: 1; overflow-y: auto; }
+
+  /* BUTTONS */
+  .btn-primary { width: 100%; padding: 16px; background: var(--green); color: white; border: none; border-radius: var(--radius-sm); font-size: 16px; font-weight: 700; font-family: 'DM Sans', sans-serif; cursor: pointer; transition: var(--transition); letter-spacing: -0.3px; box-shadow: var(--shadow-sm); }
+  .btn-primary:hover { background: var(--green-mid); transform: translateY(-1px); box-shadow: var(--shadow-md); }
+  .btn-yellow { width: 100%; padding: 16px; background: var(--yellow); color: var(--green); border: none; border-radius: var(--radius-sm); font-size: 16px; font-weight: 700; font-family: 'DM Sans', sans-serif; cursor: pointer; transition: var(--transition); }
+  .btn-yellow:hover { background: var(--yellow-dark); transform: translateY(-1px); }
+  .btn-secondary { width: 100%; padding: 14px; background: var(--bg-soft); color: var(--text); border: 1.5px solid var(--border); border-radius: var(--radius-sm); font-size: 15px; font-weight: 600; font-family: 'DM Sans', sans-serif; cursor: pointer; transition: var(--transition); margin-top: 12px; }
+  .btn-secondary:hover { border-color: var(--green); color: var(--green); }
+  .btn-danger { width: 100%; padding: 14px; background: rgba(224,72,72,0.08); color: var(--red); border: 1.5px solid rgba(224,72,72,0.25); border-radius: var(--radius-sm); font-size: 15px; font-weight: 600; font-family: 'DM Sans', sans-serif; cursor: pointer; transition: var(--transition); margin-top: 12px; }
+
+  /* SPLASH */
+  #screen-splash { background: linear-gradient(180deg, var(--bg) 0%, #EFF3EB 100%); justify-content: center; align-items: center; gap: 24px; }
+  .splash-logo { width: 88px; height: 88px; background: var(--green); border-radius: 24px; display: flex; align-items: center; justify-content: center; font-size: 38px; animation: pulse 2s infinite; box-shadow: var(--shadow-md); position: relative; }
+  .splash-logo::after { content: ''; position: absolute; bottom: -8px; right: -8px; width: 26px; height: 26px; background: var(--yellow); border-radius: 50%; border: 3px solid var(--bg); }
+  @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+  .splash-title { font-family: 'Space Grotesk', sans-serif; font-size: 42px; font-weight: 700; color: var(--text); letter-spacing: -1px; }
+  .splash-title span { color: var(--green); }
+  .splash-sub { color: var(--text-muted); font-size: 16px; }
+
+  /* DECISION SCREEN */
+  .decision-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; padding: 40px 28px; gap: 32px; text-align: center; }
+  .decision-diamond {
+    width: 220px; height: 220px;
+    background: var(--bg-soft);
+    border: 2px solid var(--green);
+    transform: rotate(45deg);
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 16px;
+    position: relative;
+    box-shadow: var(--shadow-md);
+  }
+  .decision-diamond-inner { transform: rotate(-45deg); padding: 20px; text-align: center; }
+  .decision-diamond-inner .q-icon { font-size: 32px; margin-bottom: 8px; }
+  .decision-diamond-inner .q-text { font-family: 'Space Grotesk', sans-serif; font-size: 16px; font-weight: 700; color: var(--text); line-height: 1.3; }
+  .decision-actions { display: flex; gap: 12px; width: 100%; }
+  .decision-actions button { flex: 1; }
+  .decision-context { font-size: 13px; color: var(--text-soft); line-height: 1.5; max-width: 280px; }
+
+  /* AUTH HERO */
+  .auth-hero { background: linear-gradient(170deg, #FFFFFF 0%, #EFF3EB 100%); padding: 60px 28px 40px; position: relative; overflow: hidden; border-bottom: 1px solid var(--border); }
+  .auth-hero::before { content: ''; position: absolute; top: -40px; right: -40px; width: 180px; height: 180px; background: var(--yellow); border-radius: 50%; opacity: 0.45; }
+  .auth-hero::after { content: ''; position: absolute; bottom: -30px; left: -30px; width: 100px; height: 100px; background: var(--green); border-radius: 50%; opacity: 0.08; }
+  .auth-hero-tag { display: inline-block; background: var(--green); color: white; font-size: 11px; font-weight: 700; padding: 4px 12px; border-radius: 20px; margin-bottom: 16px; letter-spacing: 1px; text-transform: uppercase; position: relative; z-index: 1; }
+  .auth-hero h1 { font-family: 'Space Grotesk', sans-serif; font-size: 36px; font-weight: 700; color: var(--text); line-height: 1.1; margin-bottom: 10px; position: relative; z-index: 1; }
+  .auth-hero h1 em { color: var(--green); font-style: normal; background: var(--yellow); padding: 0 8px; border-radius: 6px; }
+  .auth-hero p { color: var(--text-soft); font-size: 15px; position: relative; z-index: 1; }
+
+  /* AUTH CHOICE */
+  .choice-card { background: var(--bg-card); border: 1.5px solid var(--border); border-radius: var(--radius); padding: 22px; cursor: pointer; transition: var(--transition); display: flex; align-items: center; gap: 16px; margin-bottom: 12px; box-shadow: var(--shadow-sm); }
+  .choice-card:hover { border-color: var(--green); background: var(--bg-elevated); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+  .choice-card-icon { width: 56px; height: 56px; background: var(--yellow); border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 28px; flex-shrink: 0; }
+  .choice-card-info { flex: 1; }
+  .choice-card-title { font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .choice-card-sub { font-size: 13px; color: var(--text-muted); }
+  .choice-card-arrow { font-size: 20px; color: var(--green); }
+
+  /* FORM */
+  .form-group { margin-bottom: 16px; }
+  .form-label { font-size: 12px; font-weight: 600; color: var(--text-soft); letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px; display: block; }
+  .form-input { width: 100%; padding: 14px 16px; background: var(--bg-soft); border: 1.5px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-size: 15px; font-family: 'DM Sans', sans-serif; transition: var(--transition); outline: none; }
+  .form-input:focus { border-color: var(--green); background: white; box-shadow: 0 0 0 3px rgba(26,58,42,0.06); }
+  .form-input::placeholder { color: var(--text-muted); }
+
+  /* STEP TITLE */
+  .step-title { font-family: 'Space Grotesk', sans-serif; font-size: 24px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+  .step-sub { color: var(--text-soft); font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
+
+  /* MAIL CONFIRMATION */
+  .mail-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; text-align: center; margin-bottom: 24px; box-shadow: var(--shadow-sm); position: relative; overflow: hidden; }
+  .mail-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, var(--green), var(--yellow)); }
+  .mail-icon { font-size: 56px; margin-bottom: 16px; }
+  .mail-status { font-size: 14px; color: var(--text-muted); margin-bottom: 6px; }
+  .mail-addr { font-size: 15px; font-weight: 700; color: var(--green); word-break: break-all; }
+
+  /* T&C */
+  .terms-box { background: var(--bg-soft); border-radius: var(--radius-sm); padding: 16px; margin-bottom: 24px; max-height: 280px; overflow-y: auto; border: 1px solid var(--border); }
+  .terms-box h4 { color: var(--text); font-size: 13px; font-weight: 700; margin: 12px 0 6px; }
+  .terms-box h4:first-child { margin-top: 0; }
+  .terms-box p { color: var(--text-soft); font-size: 12px; line-height: 1.6; }
+  .terms-checkbox { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 16px; cursor: pointer; }
+  .terms-checkbox input { margin-top: 3px; accent-color: var(--green); }
+  .terms-checkbox label { font-size: 13px; color: var(--text); cursor: pointer; }
+
+  /* PLAN */
+  .plan-card { background: var(--bg-card); border: 2px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 12px; cursor: pointer; transition: var(--transition); position: relative; box-shadow: var(--shadow-sm); }
+  .plan-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+  .plan-card.featured { border-color: var(--yellow); background: linear-gradient(180deg, #FFFEF0 0%, var(--bg-card) 100%); }
+  .plan-card.selected { border-color: var(--green); background: #F0F8F2; }
+  .plan-badge-featured { position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: var(--yellow); color: var(--green); font-size: 11px; font-weight: 700; padding: 4px 14px; border-radius: 20px; white-space: nowrap; }
+  .plan-name { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .plan-price { font-family: 'Space Grotesk', sans-serif; font-size: 36px; font-weight: 700; color: var(--green); margin-bottom: 12px; }
+  .plan-price span { font-size: 16px; color: var(--text-muted); }
+  .plan-features { list-style: none; }
+  .plan-features li { font-size: 13px; color: var(--text-soft); padding: 4px 0; display: flex; align-items: center; gap: 8px; }
+  .plan-features li::before { content: '✓'; color: var(--green); font-weight: 700; }
+
+  /* PAYMENT */
+  .payment-card { background: var(--bg-card); border: 1.5px solid var(--border); border-radius: var(--radius); padding: 18px; margin-bottom: 10px; display: flex; align-items: center; gap: 16px; cursor: pointer; transition: var(--transition); box-shadow: var(--shadow-sm); }
+  .payment-card:hover { border-color: var(--green); transform: translateY(-1px); }
+  .payment-icon { width: 48px; height: 48px; background: var(--yellow); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
+  .payment-info { flex: 1; }
+  .payment-name { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .payment-desc { font-size: 12px; color: var(--text-muted); }
+
+  /* GRANTED */
+  .granted-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; padding: 40px 28px; text-align: center; gap: 16px; }
+  .granted-icon { width: 100px; height: 100px; background: var(--yellow); border: 3px solid var(--green); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 48px; margin-bottom: 16px; animation: pulse 2s infinite; color: var(--green); }
+  .granted-title { font-family: 'Space Grotesk', sans-serif; font-size: 28px; font-weight: 700; color: var(--green); }
+  .granted-sub { font-size: 15px; color: var(--text-soft); line-height: 1.6; }
+
+  /* DENIED */
+  .denied-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; padding: 40px 28px; text-align: center; gap: 16px; }
+  .denied-icon { width: 100px; height: 100px; background: rgba(224,72,72,0.1); border: 3px solid var(--red); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 48px; margin-bottom: 16px; color: var(--red); }
+  .denied-title { font-family: 'Space Grotesk', sans-serif; font-size: 28px; font-weight: 700; color: var(--red); }
+  .denied-sub { font-size: 15px; color: var(--text-soft); line-height: 1.6; }
+
+  /* PROCESSING */
+  .processing-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; padding: 40px; gap: 24px; text-align: center; }
+  .spinner { width: 80px; height: 80px; border: 4px solid var(--border); border-top-color: var(--green); border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* HOME */
+  #screen-home { padding-bottom: 120px; }
+  .home-header { padding: 32px 24px 28px; background: linear-gradient(180deg, #FFFFFF 0%, var(--bg) 100%); position: relative; overflow: hidden; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .home-header::after { content: ''; position: absolute; bottom: -30px; right: -20px; width: 120px; height: 120px; background: var(--yellow); opacity: 0.3; border-radius: 50%; }
+  .home-greeting { color: var(--text-muted); font-size: 14px; margin-bottom: 4px; position: relative; z-index: 1; }
+  .home-name { font-family: 'Space Grotesk', sans-serif; font-size: 26px; font-weight: 700; color: var(--text); margin-bottom: 20px; position: relative; z-index: 1; }
+  .home-name span { color: var(--green); }
+  .home-card { background: var(--green); border-radius: 20px; padding: 22px; display: flex; justify-content: space-between; align-items: center; box-shadow: var(--shadow-md); position: relative; z-index: 1; overflow: hidden; }
+  .home-card::before { content: ''; position: absolute; top: -20px; right: -20px; width: 80px; height: 80px; background: var(--yellow); border-radius: 50%; opacity: 0.15; }
+  .home-card-label { font-size: 12px; font-weight: 600; color: var(--yellow); opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px; }
+  .home-card-value { font-family: 'Space Grotesk', sans-serif; font-size: 32px; font-weight: 700; color: white; }
+  .home-card-sub { font-size: 13px; color: rgba(255,255,255,0.7); }
+  .home-card-icon { font-size: 40px; position: relative; z-index: 1; }
+
+  .menu-section-label {
+    font-size: 11px; font-weight: 700; color: var(--text-muted); letter-spacing: 1px; text-transform: uppercase;
+    padding: 24px 24px 12px; display: flex; align-items: center; gap: 8px;
+  }
+  .menu-section-label::before { content: ''; width: 14px; height: 2px; background: var(--green); }
+
+  .menu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 16px 24px 0; }
+  .menu-card { background: var(--bg-card); border: 1.5px solid var(--border); border-radius: var(--radius); padding: 20px; cursor: pointer; transition: var(--transition); position: relative; overflow: hidden; box-shadow: var(--shadow-sm); }
+  .menu-card:hover { border-color: var(--green); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+  .menu-card-icon { font-size: 28px; margin-bottom: 10px; }
+  .menu-card-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .menu-card-sub { font-size: 12px; color: var(--text-muted); }
+  .menu-card-arrow { position: absolute; bottom: 16px; right: 16px; width: 24px; height: 24px; background: var(--yellow); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--green); }
+
+  /* UPGRADE BANNER */
+  .upgrade-banner { margin: 16px 24px 0; background: linear-gradient(135deg, var(--green) 0%, var(--green-mid) 100%); border-radius: var(--radius); padding: 18px; display: flex; align-items: center; gap: 14px; cursor: pointer; transition: var(--transition); position: relative; overflow: hidden; box-shadow: var(--shadow-md); }
+  .upgrade-banner::before { content: ''; position: absolute; top: -40px; right: -40px; width: 120px; height: 120px; background: var(--yellow); border-radius: 50%; opacity: 0.15; }
+  .upgrade-banner:hover { transform: translateY(-2px); }
+  .upgrade-icon { width: 44px; height: 44px; background: var(--yellow); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; position: relative; z-index: 1; }
+  .upgrade-text { flex: 1; position: relative; z-index: 1; }
+  .upgrade-title { font-size: 14px; font-weight: 700; color: white; margin-bottom: 2px; }
+  .upgrade-sub { font-size: 12px; color: rgba(255,255,255,0.7); }
+  .upgrade-arrow { color: var(--yellow); font-size: 18px; position: relative; z-index: 1; }
+
+  /* BOTTOM NAV */
+  .bottom-nav { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(255,255,255,0.96); backdrop-filter: blur(20px); border-top: 1px solid var(--border); display: flex; padding: 12px 0 24px; }
+  .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; transition: var(--transition); }
+  .nav-icon { font-size: 22px; }
+  .nav-label { font-size: 10px; font-weight: 600; color: var(--text-muted); letter-spacing: 0.3px; }
+  .nav-item.active .nav-label { color: var(--green); }
+  .nav-item.active .nav-icon { transform: scale(1.1); }
+
+  /* NUTRICION */
+  .objective-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; margin-bottom: 20px; }
+  .objective-card { background: var(--bg-card); border: 1.5px solid var(--border); border-radius: var(--radius-sm); padding: 16px; cursor: pointer; transition: var(--transition); text-align: center; box-shadow: var(--shadow-sm); }
+  .objective-card:hover, .objective-card.selected { border-color: var(--green); background: #F0F8F2; }
+  .objective-card .obj-icon { font-size: 28px; margin-bottom: 8px; }
+  .objective-card .obj-label { font-size: 13px; font-weight: 600; color: var(--text); }
+  .diet-card { background: var(--bg-card); border: 1.5px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 12px; cursor: pointer; transition: var(--transition); box-shadow: var(--shadow-sm); }
+  .diet-card:hover { border-color: var(--green); transform: translateY(-2px); }
+  .diet-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+  .diet-name { font-size: 16px; font-weight: 700; color: var(--text); }
+  .diet-cal { background: var(--yellow); color: var(--green); font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 20px; }
+  .diet-desc { font-size: 13px; color: var(--text-soft); line-height: 1.5; margin-bottom: 12px; }
+  .diet-macros { display: flex; gap: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .macro { text-align: center; }
+  .macro-val { font-size: 16px; font-weight: 700; color: var(--green); }
+  .macro-label { font-size: 10px; color: var(--text-muted); }
+
+  /* DIETA DETALLADA */
+  .meal-row { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 10px; }
+  .meal-time { font-size: 13px; color: var(--green); font-weight: 700; margin-bottom: 6px; }
+  .meal-desc { font-size: 12px; color: var(--text-soft); line-height: 1.5; }
+
+  /* VIDA PUNTOS */
+  .points-hero { margin: 0 24px 20px; background: var(--green); border-radius: var(--radius); padding: 24px; text-align: center; position: relative; overflow: hidden; box-shadow: var(--shadow-md); }
+  .points-hero::before { content: ''; position: absolute; top: -50px; right: -50px; width: 160px; height: 160px; background: var(--yellow); border-radius: 50%; opacity: 0.1; }
+  .points-label { color: var(--yellow); font-size: 13px; margin-bottom: 8px; position: relative; z-index: 1; }
+  .points-value { font-family: 'Space Grotesk', sans-serif; font-size: 52px; font-weight: 700; color: white; line-height: 1; position: relative; z-index: 1; }
+  .points-sub { color: rgba(255,255,255,0.7); font-size: 13px; margin-top: 8px; position: relative; z-index: 1; }
+  .points-saldo-corner { position: absolute; top: 14px; right: 24px; background: var(--green); color: var(--yellow); font-size: 12px; font-weight: 700; padding: 6px 12px; border-radius: 20px; z-index: 10; }
+  .benefit-card { background: var(--bg-card); border: 1.5px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 10px; display: flex; align-items: center; gap: 16px; cursor: pointer; transition: var(--transition); box-shadow: var(--shadow-sm); }
+  .benefit-card:hover { border-color: var(--green); transform: translateY(-1px); }
+  .benefit-icon-wrap { width: 48px; height: 48px; background: var(--yellow); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
+  .benefit-info { flex: 1; }
+  .benefit-name { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .benefit-desc { font-size: 12px; color: var(--text-muted); }
+  .benefit-cost { font-size: 14px; font-weight: 700; color: var(--green); }
+
+  .obtencion-list { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+  .obtencion-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .obtencion-item:last-child { border-bottom: none; }
+  .obtencion-label { font-size: 14px; color: var(--text); }
+  .obtencion-value { font-size: 14px; font-weight: 700; color: var(--green); background: var(--yellow); padding: 4px 10px; border-radius: 20px; }
+
+  /* CLASES */
+  .filter-row { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 16px; scrollbar-width: none; }
+  .filter-row::-webkit-scrollbar { display: none; }
+  .filter-chip { padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: var(--transition); border: 1.5px solid var(--border); background: var(--bg-soft); color: var(--text-soft); font-family: 'DM Sans', sans-serif; }
+  .filter-chip.active { background: var(--green); color: white; border-color: var(--green); }
+  .class-card { background: var(--bg-card); border: 1.5px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 12px; cursor: pointer; transition: var(--transition); box-shadow: var(--shadow-sm); }
+  .class-card:hover { border-color: var(--green); transform: translateY(-2px); }
+  .class-thumb { height: 90px; display: flex; align-items: center; justify-content: center; font-size: 40px; position: relative; }
+  .class-badge { position: absolute; top: 10px; right: 10px; background: var(--yellow); color: var(--green); font-size: 10px; font-weight: 700; padding: 4px 8px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .class-tipo-badge { position: absolute; top: 10px; left: 10px; background: rgba(255,255,255,0.9); color: var(--text); font-size: 10px; font-weight: 600; padding: 4px 8px; border-radius: 20px; }
+  .class-body { padding: 14px; background: var(--bg-card); }
+  .class-name { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+  .class-meta { display: flex; gap: 12px; flex-wrap: wrap; }
+  .class-meta-item { font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 4px; }
+
+  /* HORARIO PICKER */
+  .horario-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 20px; }
+  .horario-chip { padding: 12px; text-align: center; border-radius: var(--radius-sm); background: var(--bg-card); border: 1.5px solid var(--border); font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; transition: var(--transition); }
+  .horario-chip:hover { border-color: var(--green); }
+  .horario-chip.selected { background: var(--green); color: white; border-color: var(--green); }
+  .horario-chip.unavailable { opacity: 0.3; cursor: not-allowed; }
+
+  /* CLASS DETAIL */
+  .class-detail-hero { height: 160px; background: var(--green); display: flex; align-items: center; justify-content: center; font-size: 64px; margin: 0 -24px 20px; position: relative; overflow: hidden; }
+  .class-detail-hero::before { content: ''; position: absolute; top: -40px; right: -40px; width: 160px; height: 160px; background: var(--yellow); border-radius: 50%; opacity: 0.15; }
+  .class-detail-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .class-detail-meta span { background: var(--bg-soft); color: var(--text); font-size: 12px; padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border); }
+  .class-detail-meta span.yellow { background: var(--yellow); color: var(--green); font-weight: 700; border-color: var(--yellow); }
+
+  /* QR */
+  .qr-box { width: 200px; height: 200px; background: var(--bg-card); border-radius: 20px; padding: 16px; display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-lg); margin: 0 auto 20px; border: 2px solid var(--green); }
+  .qr-inner { width: 168px; height: 168px; background: repeating-conic-gradient(var(--green) 0% 25%, var(--bg-card) 0% 50%) 0 0/16px 16px; border-radius: 8px; }
+  .qr-timer { background: var(--green); color: var(--yellow); border-radius: 30px; padding: 10px 24px; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0 auto 12px; width: fit-content; }
+  .qr-timer-dot { width: 8px; height: 8px; background: var(--yellow); border-radius: 50%; animation: blink 1s infinite; }
+  @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0; } }
+  .qr-valid-badge { background: var(--yellow); color: var(--green); font-size: 12px; font-weight: 700; padding: 6px 14px; border-radius: 20px; display: inline-block; margin: 12px auto 0; }
+  .bio-icon-big { width: 120px; height: 120px; background: var(--yellow); border: 3px solid var(--green); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 56px; margin: 0 auto 24px; animation: pulse 2s infinite; }
+  .face-scan-frame { width: 220px; height: 220px; margin: 0 auto 20px; position: relative; border-radius: 24px; overflow: hidden; background: var(--bg-card); border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-md); }
+  .face-scan-frame .corner { position: absolute; width: 28px; height: 28px; border-color: var(--green); border-style: solid; }
+  .face-scan-frame .c-tl { top: 10px; left: 10px; border-width: 3px 0 0 3px; border-top-left-radius: 8px; }
+  .face-scan-frame .c-tr { top: 10px; right: 10px; border-width: 3px 3px 0 0; border-top-right-radius: 8px; }
+  .face-scan-frame .c-bl { bottom: 10px; left: 10px; border-width: 0 0 3px 3px; border-bottom-left-radius: 8px; }
+  .face-scan-frame .c-br { bottom: 10px; right: 10px; border-width: 0 3px 3px 0; border-bottom-right-radius: 8px; }
+  .face-scan-frame .face-emoji { font-size: 100px; }
+  .face-scan-line { position: absolute; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, transparent, var(--yellow), transparent); animation: scanline 2s linear infinite; }
+  @keyframes scanline { 0% { top: 10%; } 50% { top: 90%; } 100% { top: 10%; } }
+
+  /* SEDES */
+  .sede-card { background: var(--bg-card); border: 1.5px solid var(--border); border-radius: var(--radius); padding: 18px; margin-bottom: 10px; cursor: pointer; transition: var(--transition); box-shadow: var(--shadow-sm); }
+  .sede-card:hover { border-color: var(--green); transform: translateY(-1px); }
+  .sede-card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+  .sede-name { font-size: 16px; font-weight: 700; color: var(--text); }
+  .sede-open { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px; }
+  .sede-open.open { background: var(--yellow); color: var(--green); }
+  .sede-open.closed { background: rgba(224,72,72,0.1); color: var(--red); }
+  .sede-address { font-size: 13px; color: var(--text-muted); margin-bottom: 12px; }
+  .sede-info-row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .sede-info-item { font-size: 12px; color: var(--text-soft); display: flex; align-items: center; gap: 4px; }
+
+  .map-placeholder { background: linear-gradient(135deg, #E8F0E5, #F0F5EC); border-radius: var(--radius); height: 140px; display: flex; align-items: center; justify-content: center; margin-bottom: 20px; border: 1.5px solid var(--border); flex-direction: column; gap: 8px; }
+
+  /* SEDE DETAIL */
+  .detail-option { background: var(--bg-card); border: 1.5px solid var(--border); border-radius: var(--radius); padding: 18px; margin-bottom: 10px; cursor: pointer; transition: var(--transition); display: flex; align-items: center; gap: 14px; box-shadow: var(--shadow-sm); }
+  .detail-option:hover { border-color: var(--green); }
+  .detail-option-icon { width: 44px; height: 44px; background: var(--yellow); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+  .detail-option-text { flex: 1; }
+  .detail-option-title { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 2px; }
+  .detail-option-sub { font-size: 12px; color: var(--text-muted); }
+
+  .info-box { background: var(--bg-card); border-radius: var(--radius); padding: 18px; margin-bottom: 12px; border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
+  .info-box-title { font-size: 12px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 10px; }
+  .info-box-content { font-size: 14px; color: var(--text); line-height: 1.7; }
+
+  /* RUTINAS */
+  .routine-card { background: var(--bg-card); border: 1.5px solid var(--border); border-radius: var(--radius); padding: 18px; margin-bottom: 10px; cursor: pointer; transition: var(--transition); box-shadow: var(--shadow-sm); }
+  .routine-card:hover { border-color: var(--green); }
+  .routine-name { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+  .routine-obj { display: inline-block; background: var(--yellow); color: var(--green); font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px; margin-bottom: 10px; }
+  .routine-exercises { font-size: 13px; color: var(--text-soft); }
+
+  /* ALERT */
+  .alert { display: none; position: absolute; top: 60px; left: 20px; right: 20px; padding: 14px 18px; border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; z-index: 200; animation: slideDown 0.3s ease; box-shadow: var(--shadow-lg); }
+  .alert.show { display: flex; align-items: center; gap: 10px; }
+  .alert.success { background: var(--green); color: var(--yellow); }
+  .alert.error { background: var(--red); color: white; }
+  @keyframes slideDown { from { transform: translateY(-20px); opacity:0; } to { transform: translateY(0); opacity:1; } }
+
+  .text-green { color: var(--green); font-weight: 700; }
+  .gap-info { font-size: 13px; color: var(--text-muted); text-align: center; margin-top: 12px; }
+
+  /* YOUTUBE COMPACT LINKS */
+  .yt-section-label { font-size: 11px; font-weight: 700; color: var(--text-muted); letter-spacing: 1px; text-transform: uppercase; padding: 16px 24px 10px; }
+  .yt-link { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; text-decoration: none; transition: var(--transition); box-shadow: var(--shadow-sm); }
+  .yt-link:hover { background: var(--bg-elevated); border-color: var(--green); }
+  .yt-link-icon { width: 32px; height: 32px; background: #FF0000; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; flex-shrink: 0; }
+  .yt-link-text { flex: 1; min-width: 0; }
+  .yt-link-title { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .yt-link-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+  /* PERFIL / SUSCRIPCION */
+  .perfil-hero { background: var(--green); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; position: relative; overflow: hidden; box-shadow: var(--shadow-md); }
+  .perfil-hero::before { content: ''; position: absolute; top: -30px; right: -30px; width: 120px; height: 120px; background: var(--yellow); border-radius: 50%; opacity: 0.12; }
+  .perfil-avatar { width: 64px; height: 64px; background: var(--yellow); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; margin-bottom: 12px; position: relative; z-index: 1; }
+  .perfil-name { font-family: 'Space Grotesk', sans-serif; font-size: 20px; font-weight: 700; color: white; margin-bottom: 4px; position: relative; z-index: 1; }
+  .perfil-mail { font-size: 13px; color: rgba(255,255,255,0.7); position: relative; z-index: 1; }
+  .perfil-badge { display: inline-block; background: var(--yellow); color: var(--green); font-size: 11px; font-weight: 700; padding: 4px 12px; border-radius: 20px; margin-top: 10px; position: relative; z-index: 1; }
+
+  .config-row { background: var(--bg-card); border: 1.5px solid var(--border); border-radius: var(--radius-sm); padding: 16px; margin-bottom: 8px; display: flex; align-items: center; gap: 14px; cursor: pointer; transition: var(--transition); box-shadow: var(--shadow-sm); }
+  .config-row:hover { border-color: var(--green); }
+  .config-row-icon { width: 40px; height: 40px; background: var(--yellow); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+  .config-row-text { flex: 1; }
+  .config-row-title { font-size: 14px; font-weight: 600; color: var(--text); }
+  .config-row-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+  /* TARJETA FORM */
+  .card-preview { background: var(--green); border-radius: var(--radius); padding: 24px; margin-bottom: 20px; position: relative; overflow: hidden; box-shadow: var(--shadow-md); }
+  .card-preview::after { content: ''; position: absolute; top: -30px; right: -30px; width: 120px; height: 120px; background: var(--yellow); opacity: 0.15; border-radius: 50%; }
+  .card-chip { width: 36px; height: 28px; background: linear-gradient(135deg, #D4AF37, #F5D76E); border-radius: 6px; margin-bottom: 16px; position: relative; z-index: 1; }
+  .card-number-display { font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 600; color: white; letter-spacing: 2px; margin-bottom: 16px; position: relative; z-index: 1; }
+  .card-footer { display: flex; justify-content: space-between; position: relative; z-index: 1; }
+  .card-footer-label { font-size: 9px; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 1px; }
+  .card-footer-value { font-size: 13px; color: white; font-weight: 600; margin-top: 2px; }
+  .card-brand { position: absolute; top: 20px; right: 20px; font-size: 22px; font-weight: 700; color: var(--yellow); font-family: 'Space Grotesk', sans-serif; z-index: 1; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 </style>
-"""
-pg = st.sidebar.radio(
-    "Navegacion",
-    ["Dashboard Principal", "Modelo Predictivo", "Análisis por Patente", "Datos Operativos"],
-    index=0,
-    label_visibility="collapsed"
-)
-st.sidebar.markdown("---")
-st.sidebar.image(LOGO_URL, width=160)
-@st.cache_data(ttl=600)
-def cargar_datos():
-    try:
-        df1 = pd.read_csv(URL_TEL)
-        def limpiar(df):
-            df.columns = [str(c).strip().upper() for c in df.columns]
-            df = df.loc[:, ~df.columns.duplicated()]
-            cm = {}
-            for c in df.columns:
-                if   "DOMINIO"   in c or "PATENTE"  in c:              cm[c] = "DOMINIO"
-                elif "LITROS"    in c or "CONSUMID" in c:              cm[c] = "LITROS"
-                elif "DISTANCIA" in c or c == "KM" or "KILOMETR" in c: cm[c] = "KM"
-                elif "MARCA"     in c:                                  cm[c] = "MARCA"
-                elif "TAG"       in c:                                  cm[c] = "TAG"
-                elif "FECHA"     in c or "DATE"     in c:              cm[c] = "FECHA"
-                elif "L/100"     in c or "CONSUMO C" in c:             cm[c] = "L100KM"
-                elif "TIEMPO"    in c and "MOTOR"   in c:              cm[c] = "TIEMPO_MOTOR"
-                elif "EMPRESA"   in c:                                  cm[c] = "EMPRESA"
-            df = df.rename(columns=cm).loc[:, ~df.rename(columns=cm).columns.duplicated()]
-            if "DOMINIO" in df.columns:
-                df["DOMINIO"] = df["DOMINIO"].astype(str).str.strip().str.upper()
-            for col in ["LITROS", "KM", "L100KM"]:
-                if col in df.columns:
-                    serie = df[col]
-                    if isinstance(serie, pd.DataFrame):
-                        serie = serie.iloc[:, 0]
-                    serie = serie.astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
-                    df[col] = pd.to_numeric(serie, errors="coerce").fillna(0)
-            if "FECHA" in df.columns:
-                df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce", dayfirst=True)
-            return df
-        df1 = limpiar(df1)
-        if "L100KM" not in df1.columns and "LITROS" in df1.columns and "KM" in df1.columns:
-            df1["L100KM"] = (df1["LITROS"] / df1["KM"].replace(0, np.nan) * 100).round(2)
-        if "EMPRESA" in df1.columns:
-            df1 = df1[df1["EMPRESA"].str.upper().str.contains("LAD|DIEMAR", na=False)]
-        # Hoja UNIDADES eliminada. Patentes y todo lo demás salen de TELEMETRÍA.
-        # Ralentí eliminado del flujo.
-        return df1, pd.DataFrame()
-    except Exception as e:
-        st.error(f"Error cargando datos: {e}")
-        return pd.DataFrame(), pd.DataFrame()
-@st.cache_data(ttl=600)
-def cargar_velocidad():
-    try:
-        df = pd.read_csv(URL_VEL)
-        df.columns = [str(c).strip() for c in df.columns]
-        col_map = {}
-        for c in df.columns:
-            cl = c.lower()
-            if   "movil" in cl or "patente" in cl or "dominio" in cl: col_map[c] = "DOMINIO"
-            elif "fecha"    in cl:                                      col_map[c] = "FECHA"
-            elif "veloc"    in cl:                                      col_map[c] = "VELOCIDAD"
-            elif "gravedad" in cl:                                      col_map[c] = "GRAVEDAD"
-            elif "tipo"     in cl:                                      col_map[c] = "TIPO"
-        df = df.rename(columns=col_map)
-        if "DOMINIO" in df.columns:
-            df["DOMINIO"] = df["DOMINIO"].astype(str).str.strip().str.upper()
-        if "FECHA" in df.columns:
-            df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce", dayfirst=True)
-        if "VELOCIDAD" not in df.columns:
-            for c in df.columns:
-                try:
-                    serie = pd.to_numeric(df[c].astype(str).str.replace(",", ".", regex=False), errors="coerce")
-                    if serie.dropna().between(50, 200).mean() > 0.5:
-                        df = df.rename(columns={c: "VELOCIDAD"})
-                        break
-                except Exception:
-                    continue
-        if "VELOCIDAD" not in df.columns:
-            return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH"])
-        df["VELOCIDAD"] = pd.to_numeric(
-            df["VELOCIDAD"].astype(str).str.replace(",", ".", regex=False), errors="coerce"
-        )
-        df = df[df["VELOCIDAD"] > LIMITE_VELOCIDAD].copy()
-        df["EXCESO_KMH"] = (df["VELOCIDAD"] - LIMITE_VELOCIDAD).round(1)
-        keep = [c for c in ["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH","GRAVEDAD","TIPO"] if c in df.columns]
-        return df[keep].dropna(subset=["DOMINIO","FECHA"]).reset_index(drop=True)
-    except Exception:
-        return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH"])
-@st.cache_data(ttl=3600)
-def cargar_carga(tractores_validos=None):
-    try:
-        import re
-        df = pd.read_excel(CARGA_URL)
-        df.columns = [str(c).strip() for c in df.columns]
-        col_unid   = next((c for c in df.columns if 'UNID'    in c.upper()), None)
-        col_peso   = next((c for c in df.columns if 'PESO'    in c.upper() and 'ENTREGAD' in c.upper()), None)
-        col_fecha  = next((c for c in df.columns if 'FECHA'   in c.upper()), None)
-        col_estado = next((c for c in df.columns if 'ESTADO'  in c.upper()), None)
-        if not all([col_unid, col_peso, col_fecha]):
-            return pd.DataFrame()
-        if col_estado:
-            df = df[df[col_estado].astype(str).str.upper() == 'FINALIZADA']
-        df[col_fecha] = pd.to_datetime(df[col_fecha], errors='coerce')
-        df[col_peso]  = pd.to_numeric(df[col_peso],  errors='coerce').fillna(0)
-        df = df[(df[col_peso] > 0) & df[col_fecha].notna()].copy()
-        def norm_pat(p):
-            return re.sub(r'\s+', '', str(p).strip().upper())
-        # La celda UNIDADES puede traer "TRACTOR, ACOPLADO" en cualquier orden.
-        # Estrategia: dentro de cada celda, elegir la patente que figure en la flota
-        # de tractores (telemetría). Si ninguna matchea → tomar la primera (fallback).
-        # Así el peso NUNCA se duplica y siempre se asigna al tractor real.
-        tractores_set = set()
-        if tractores_validos is not None:
-            tractores_set = {norm_pat(t) for t in tractores_validos if pd.notna(t)}
-        def elegir_tractor(celda):
-            pats = [norm_pat(p) for p in str(celda).split(',') if str(p).strip()]
-            if not pats:
-                return ''
-            if tractores_set:
-                for p in pats:
-                    if p in tractores_set:
-                        return p
-            return pats[0]
-        df['DOMINIO'] = df[col_unid].apply(elegir_tractor)
-        df['MES']      = df[col_fecha].dt.to_period('M')
-        df['PESO_TON'] = df[col_peso] / 1000.0
-        return (df.groupby(['DOMINIO','MES'])
-                  .agg(PESO_TON=('PESO_TON','sum'))
-                  .reset_index())
-    except Exception:
-        return pd.DataFrame()
-@st.cache_data(ttl=3600)
-def obtener_precio_gasoil():
-    try:
-        import re
-        headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get("https://surtidores.com.ar/precios/", headers=headers, timeout=10)
-        soup  = BeautifulSoup(r.text, "html.parser")
-        texto = soup.get_text(separator=" ")
-        idx_2026 = texto.find("2026")
-        if idx_2026 != -1:
-            segmento   = texto[idx_2026:idx_2026 + 600]
-            gasoil_idx = segmento.lower().find("gasoil")
-            if gasoil_idx != -1:
-                linea   = segmento[gasoil_idx:gasoil_idx + 120]
-                numeros = re.findall(r'\b(\d{3,4})\b', linea)
-                numeros = [int(n) for n in numeros if 500 <= int(n) <= 5000]
-                if numeros:
-                    return float(numeros[-1]), "surtidores.com.ar (2026)"
-        matches = re.findall(r'[Gg]as[oi][il][^\d]*(\d{3,4})', texto[:8000])
-        if matches:
-            precio = float(matches[0])
-            if 500 < precio < 5000:
-                return precio, "surtidores.com.ar"
-    except Exception:
-        pass
-    return 2025.0, "referencia estimada"
-def asignar_modelo(dominio):
-    d = str(dominio).strip().upper()
-    if d in SWAY_PATENTES:   return 'S-Way'
-    if d in SCANIA_PATENTES: return 'Scania'
-    return 'Stralis'
-def calcular_score_zscore(series, higher_is_better=True, k=0.4, min_sigma_pct=0.05):
-    series = pd.to_numeric(series, errors='coerce')
-    if series.dropna().count() <= 1:
-        return pd.Series(1.0, index=series.index)
-    mu    = series.mean()
-    sigma = series.std(ddof=0)
-    if sigma < 1e-9 and abs(mu) < 1e-9:
-        return pd.Series(1.0, index=series.index)
-    sigma_floor = min_sigma_pct * abs(mu) if abs(mu) > 1e-9 else 0.0
-    sigma_eff   = max(sigma, sigma_floor)
-    if sigma_eff < 1e-9:
-        return pd.Series(1.0, index=series.index)
-    z = (series - mu) / sigma_eff
-    if not higher_is_better:
-        z = -z
-    scores = 1.0 + 1.5 * np.tanh(k * z)
-    return scores.clip(0.4, 2.5).fillna(1.0)
-def calcular_ier(df, df_vel=None, df_carga=None):
-    if 'DOMINIO' not in df.columns or df.empty:
-        return pd.DataFrame()
-    df_c = df[df['L100KM'] > 0].copy()
-    if df_c.empty:
-        return pd.DataFrame()
-    agg_dict = {'L100KM': ('L100KM','mean'), 'KM': ('KM','sum'), 'LITROS': ('LITROS','sum')}
-    if 'MES_PERIODO' in df_c.columns:
-        agg_dict['MESES'] = ('MES_PERIODO','nunique')
-    agg = df_c.groupby('DOMINIO').agg(**agg_dict).reset_index()
-    if df_vel is not None and not df_vel.empty and 'DOMINIO' in df_vel.columns:
-        vel_counts = df_vel.groupby('DOMINIO').agg(
-            EXCESOS=('DOMINIO','count'),
-            VEL_MAX=('VELOCIDAD','max'),
-            SEVERIDAD=('EXCESO_KMH','sum')  # km/h acumulados sobre el límite: combina frecuencia + magnitud
-        ).reset_index()
-        agg = agg.merge(vel_counts, on='DOMINIO', how='left')
-        agg['EXCESOS']   = agg['EXCESOS'].fillna(0).astype(int)
-        agg['VEL_MAX']   = agg['VEL_MAX'].fillna(0)
-        agg['SEVERIDAD'] = agg['SEVERIDAD'].fillna(0)
-    else:
-        agg['EXCESOS'] = 0; agg['VEL_MAX'] = 0; agg['SEVERIDAD'] = 0.0
-    agg['MODELO'] = agg['DOMINIO'].apply(asignar_modelo)
-    # Alineación temporal: TONKML usa SOLO meses con telemetría Y carga simultánea
-    agg['KM_CARGA']     = 0.0
-    agg['LITROS_CARGA'] = 0.0
-    if df_carga is not None and not df_carga.empty and 'MES_PERIODO' in df_c.columns and 'MES' in df_carga.columns:
-        meses_telem  = set(df_c['MES_PERIODO'].dropna().unique())
-        meses_carga  = set(df_carga['MES'].dropna().unique())
-        meses_comunes = meses_telem & meses_carga
-        if meses_comunes:
-            carga_periodo = df_carga[df_carga['MES'].isin(meses_comunes)]
-            df_c_carga    = df_c[df_c['MES_PERIODO'].isin(meses_comunes)]
-            carga_agg = carga_periodo.groupby('DOMINIO')['PESO_TON'].sum().reset_index()
-            km_lts_carga = df_c_carga.groupby('DOMINIO').agg(
-                KM_CARGA=('KM','sum'), LITROS_CARGA=('LITROS','sum')
-            ).reset_index()
-            agg = agg.drop(columns=['KM_CARGA','LITROS_CARGA'])
-            agg = agg.merge(carga_agg, on='DOMINIO', how='left')
-            agg = agg.merge(km_lts_carga, on='DOMINIO', how='left')
-            agg['PESO_TON']     = agg['PESO_TON'].fillna(0)
-            agg['KM_CARGA']     = agg['KM_CARGA'].fillna(0)
-            agg['LITROS_CARGA'] = agg['LITROS_CARGA'].fillna(0)
-        else:
-            agg['PESO_TON'] = 0.0
-    else:
-        agg['PESO_TON'] = 0.0
-    # TONKML alineado: usa KM y LITROS de los mismos meses que PESO_TON
-    agg['TONKML'] = np.where(
-        (agg['PESO_TON']>0)&(agg['LITROS_CARGA']>0),
-        (agg['PESO_TON']*agg['KM_CARGA'])/agg['LITROS_CARGA'], np.nan)
-    tiene_carga = agg['PESO_TON'].sum() > 0
-    def _safe_mean(x):
-        v = x.dropna(); return v.mean() if len(v)>0 else np.nan
-    modelo_avgs = agg.groupby('MODELO').agg(
-        L100KM_MOD=('L100KM','mean'), KM_MOD=('KM','mean'),
-        EXCESOS_MOD=('EXCESOS','mean'),
-        SEVERIDAD_MOD=('SEVERIDAD','mean'),
-        TONKML_MOD=('TONKML',_safe_mean)).reset_index()
-    agg = agg.merge(modelo_avgs, on='MODELO', how='left')
-    for col in ['SCORE_CONSUMO','SCORE_KM','SCORE_VEL','SCORE_CARGA']:
-        agg[col] = 1.0
-    for modelo in agg['MODELO'].unique():
-        mask = agg['MODELO']==modelo
-        idx  = agg.index[mask]
-        if mask.sum()==0: continue
-        agg.loc[idx,'SCORE_CONSUMO'] = calcular_score_zscore(agg.loc[idx,'L100KM'], higher_is_better=False, k=0.4, min_sigma_pct=0.05).values
-        agg.loc[idx,'SCORE_KM'] = calcular_score_zscore(agg.loc[idx,'KM'], higher_is_better=True, k=0.4, min_sigma_pct=0.05).values
-        # Excesos: SEVERIDAD = suma de km/h sobre el límite (frecuencia × magnitud combinadas)
-        # Ej: 5 eventos a 95 km/h (sum=35) > 10 eventos a 89 km/h (sum=10) → 95 penaliza más
-        sev_log = np.log1p(agg.loc[idx,'SEVERIDAD'].astype(float))
-        agg.loc[idx,'SCORE_VEL'] = calcular_score_zscore(sev_log, higher_is_better=False, k=0.4, min_sigma_pct=0.30).values
-        if tiene_carga:
-            carga_vals = agg.loc[idx,'TONKML']
-            valid_c    = carga_vals.dropna()
-            valid_c    = valid_c[valid_c>0]
-            if len(valid_c)>1:
-                sc = calcular_score_zscore(carga_vals.where(carga_vals>0), higher_is_better=True, k=0.4, min_sigma_pct=0.10).fillna(1.0)
-                agg.loc[idx,'SCORE_CARGA'] = sc.values
-    # Ponderación con renormalización si no hay carga:
-    #   CON carga:  40% L/100km · 40% ton·km/L · 10% KM · 10% excesos severidad
-    #   SIN carga:  80% L/100km · 10% KM · 10% excesos severidad
-    if tiene_carga:
-        agg['IER'] = (
-            0.40 * agg['SCORE_CONSUMO'] +
-            0.40 * agg['SCORE_CARGA']   +
-            0.10 * agg['SCORE_KM']      +
-            0.10 * agg['SCORE_VEL']
-        ).mul(100).round(1)
-    else:
-        agg['IER'] = (
-            0.80 * agg['SCORE_CONSUMO'] +
-            0.10 * agg['SCORE_KM']      +
-            0.10 * agg['SCORE_VEL']
-        ).mul(100).round(1)
-    agg['IER'] = agg['IER'].fillna(100.0)
-    # Doble centrado eliminado: Z-score ya centra cada modelo en ~100.
-    # Re-restar grp_mean achataba la varianza tras el clip [0.4, 2.5].
-    def clasif(v):
-        if   v>=105: return '🟢 Eficiente'
-        elif v>= 95: return '🟡 Normal'
-        elif v>= 85: return '🟠 Atención'
-        else:        return '🔴 Crítico'
-    agg['CLASIFICACION'] = agg['IER'].apply(clasif)
-    agg['TONKML']     = agg['TONKML'].fillna(0).round(2)
-    agg['TONKML_MOD'] = agg['TONKML_MOD'].fillna(0).round(2)
-    keep = ['DOMINIO','MODELO','IER','CLASIFICACION',
-            'L100KM','L100KM_MOD',
-            'KM','KM_MOD','LITROS','EXCESOS','SEVERIDAD','SEVERIDAD_MOD','VEL_MAX','EXCESOS_MOD',
-            'PESO_TON','TONKML','TONKML_MOD',
-            'SCORE_CONSUMO','SCORE_KM','SCORE_VEL','SCORE_CARGA']
-    if 'MESES' in agg.columns: keep.append('MESES')
-    return agg[keep].sort_values('IER', ascending=False).reset_index(drop=True)
-with st.spinner('Cargando telemetría, velocidades y datos de carga...'):
-    df_raw, _      = cargar_datos()
-    df_vel_raw     = cargar_velocidad()
-    # Tractores tomados de TELEMETRÍA. Se pasan a cargar_carga para identificar
-    # la patente correcta cuando UNIDADES del BI trae tractor+acoplado en la misma celda.
-    tractores_flota = tuple(df_raw['DOMINIO'].dropna().unique()) if (df_raw is not None and not df_raw.empty and 'DOMINIO' in df_raw.columns) else ()
-    df_carga_raw    = cargar_carga(tractores_flota)
-if df_raw.empty:
-    st.warning('No se pudieron cargar datos.')
-    st.stop()
-precio_gasoil, precio_fuente = obtener_precio_gasoil()
-st.markdown(DARK_CSS, unsafe_allow_html=True)
-if 'DOMINIO' in df_raw.columns:
-    df_raw['MODELO'] = df_raw['DOMINIO'].apply(asignar_modelo)
-df_full = df_raw.copy()
-anios_disponibles = (sorted(df_full['FECHA'].dt.year.dropna().unique().tolist(), reverse=True)
-                     if 'FECHA' in df_full.columns else [2025])
-anio_sel = st.sidebar.selectbox('Año de visualización', anios_disponibles, index=0)
-df = (df_full[df_full['FECHA'].dt.year==anio_sel].copy()
-      if 'FECHA' in df_full.columns else df_full.copy())
-if not df_vel_raw.empty and 'FECHA' in df_vel_raw.columns:
-    df_vel_anio = df_vel_raw[df_vel_raw['FECHA'].dt.year==anio_sel].copy()
-else:
-    df_vel_anio = df_vel_raw.copy()
-if 'FECHA' in df.columns and df['FECHA'].notna().any():
-    st.sidebar.markdown("---")
-    st.sidebar.markdown('<div class="sidebar-filter-header">🔍 Filtros</div>', unsafe_allow_html=True)
-    periodos_disponibles = sorted(df['FECHA'].dt.to_period('M').dropna().unique().tolist())
-    periodos_str = [str(p) for p in periodos_disponibles]
-    if periodos_str:
-        desde_idx = st.sidebar.selectbox('Desde (mes/año)', options=periodos_str, index=0)
-        hasta_idx = st.sidebar.selectbox('Hasta (mes/año)', options=periodos_str, index=len(periodos_str)-1)
-        desde_periodo = pd.Period(desde_idx, 'M')
-        hasta_periodo = pd.Period(hasta_idx, 'M')
-        # Exponer globalmente para que otras secciones (Datos Operativos) puedan filtrar
-        st.session_state['desde_periodo'] = desde_periodo
-        st.session_state['hasta_periodo'] = hasta_periodo
-        df = df[(df['FECHA'].dt.to_period('M')>=desde_periodo)&(df['FECHA'].dt.to_period('M')<=hasta_periodo)]
-    marcas_disp   = sorted(df['MARCA'].dropna().unique().tolist())   if 'MARCA'   in df.columns else []
-    marcas_sel    = st.sidebar.multiselect('Marca', marcas_disp, default=marcas_disp)
-    patentes_disp = sorted(df['DOMINIO'].dropna().unique().tolist()) if 'DOMINIO' in df.columns else []
-    patentes_sel  = st.sidebar.multiselect('Patente', patentes_disp, default=[], placeholder="Todas las patentes")
-    if marcas_sel   and 'MARCA'   in df.columns: df = df[df['MARCA'].isin(marcas_sel)]
-    if patentes_sel and 'DOMINIO' in df.columns: df = df[df['DOMINIO'].isin(patentes_sel)]
-if df.empty:
-    st.warning(f'Sin datos para {anio_sel} con los filtros seleccionados.')
-    st.stop()
-df['MES_PERIODO'] = df['FECHA'].dt.to_period('M')
-df['MES_NUM']     = df['FECHA'].dt.month
-meses_df = df.groupby('MES_PERIODO').agg(LITROS=('LITROS','sum'),KM=('KM','sum')).reset_index().sort_values('MES_PERIODO')
-meses_df['L100'] = (meses_df['LITROS']/meses_df['KM'].replace(0,np.nan)*100).round(2)
-df_full_clean = df_full[df_full['FECHA'].notna()&(df_full['KM']>0)].copy()
-df_full_clean['MES_PERIODO'] = df_full_clean['FECHA'].dt.to_period('M')
-meses_hist_full = df_full_clean.groupby('MES_PERIODO').agg(LITROS=('LITROS','sum'),KM=('KM','sum')).reset_index().sort_values('MES_PERIODO')
-meses_hist_full['L100'] = (meses_hist_full['LITROS']/meses_hist_full['KM'].replace(0,np.nan)*100).round(2)
-meses_hist_full = meses_hist_full[meses_hist_full['KM']>0].copy()
-n_meses_entrenamiento = len(meses_hist_full)
-if not df.empty and not df_vel_anio.empty and 'FECHA' in df_vel_anio.columns:
-    _mes_min = df['FECHA'].dropna().dt.to_period('M').min()
-    _mes_max = df['FECHA'].dropna().dt.to_period('M').max()
-    _vel_periodos = df_vel_anio['FECHA'].dropna().dt.to_period('M')
-    df_vel_filtrado = df_vel_anio[(_vel_periodos>=_mes_min)&(_vel_periodos<=_mes_max)&(df_vel_anio['DOMINIO'].isin(df['DOMINIO'].unique()))].copy()
-else:
-    df_vel_filtrado = df_vel_anio.copy()
-df_ier = calcular_ier(df, df_vel_filtrado, df_carga=df_carga_raw)
-total_excesos  = len(df_vel_filtrado) if not df_vel_filtrado.empty else 0
-vel_max_global = (df_vel_filtrado['VELOCIDAD'].max() if not df_vel_filtrado.empty and 'VELOCIDAD' in df_vel_filtrado.columns else 0)
-# ═══════════════════════════════════════════════════════════════════════════════
-#  PESTAÑA 1 — DASHBOARD PRINCIPAL
-# ═══════════════════════════════════════════════════════════════════════════════
-if pg == "Dashboard Principal":
-    col_logo, col_title = st.columns([1,5])
-    with col_logo: st.image(LOGO_URL, width=130)
-    with col_title:
-        st.markdown(f"""<div style='padding:8px 0;'>
-        <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>Expreso Diemar &mdash; Dashboard LAD {anio_sel}</div>
-        <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Telemetría flota LAD &middot; Año {anio_sel} &middot; Actualización automática</div>
-        </div>""", unsafe_allow_html=True)
-    st.markdown(f'<div style="margin-bottom:12px;"><span class="price-badge">&#9981; Precio gasoil: <b>${precio_gasoil:,.0f}/L</b></span>&nbsp;&nbsp;<span style="font-size:.75rem;color:#64748b;">Fuente: {precio_fuente}</span></div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="sec-title">Métricas Globales — {anio_sel}</div>', unsafe_allow_html=True)
-    lts_total  = df['LITROS'].sum() if 'LITROS' in df.columns else 0
-    kms_total  = df['KM'].sum()     if 'KM'     in df.columns else 0
-    l100_prom  = round(lts_total/kms_total*100,2) if kms_total>0 else 0
-    costo_est  = lts_total*precio_gasoil
-    n_unidades = df['DOMINIO'].nunique() if 'DOMINIO' in df.columns else 0
-    if len(meses_df)>=2:
-        delta_l100 = meses_df['L100'].iloc[-1]-meses_df['L100'].iloc[-2]
-        delta_txt  = f"{'▲' if delta_l100>0 else '▼'} {abs(delta_l100):.2f} vs mes anterior"
-        delta_col  = 'kpi-red' if delta_l100>0 else 'kpi-green'
-    else:
-        delta_txt, delta_col = '', ''
-    def kpi(cont, color, label, value, sub=''):
-        cont.markdown(f'<div class="kpi-card {color}"><div class="kpi-label">{label}</div><div class="kpi-value">{value}</div><div class="kpi-sub">{sub}</div></div>', unsafe_allow_html=True)
-    k1,k2,k3 = st.columns(3)
-    kpi(k1,'','⛽ Litros totales',f'{lts_total:,.0f}',f'litros {anio_sel}')
-    kpi(k2,'','🛣️ KM recorridos',f'{kms_total:,.0f}',f'kilómetros {anio_sel}')
-    kpi(k3,delta_col,'📊 L/100km flota',f'{l100_prom:.2f}',delta_txt)
-    k4,k5 = st.columns(2)
-    kpi(k4,'kpi-amber','💰 Costo estimado',f'${costo_est/1e6:.1f}M',f'@ ${precio_gasoil:,.0f}/L')
-    kpi(k5,'kpi-green','🚛 Unidades activas',f'{n_unidades}','dominios únicos')
-    st.divider()
-    st.markdown(f'<div class="sec-title">Rendimiento por Modelo — {anio_sel}</div>', unsafe_allow_html=True)
-    def stats_modelo(patentes_lista):
-        if 'DOMINIO' not in df.columns: return {'l100':0,'lts':0,'kms':0,'n':0}
-        sub = df[df['DOMINIO'].isin(patentes_lista)]
-        if sub.empty: return {'l100':0,'lts':0,'kms':0,'n':0}
-        lts=sub['LITROS'].sum(); kms=sub['KM'].sum()
-        return {'l100':round(lts/kms*100,2) if kms>0 else 0,'lts':lts,'kms':kms,'n':sub['DOMINIO'].nunique()}
-    todas_patentes   = df['DOMINIO'].dropna().unique().tolist() if 'DOMINIO' in df.columns else []
-    stralis_patentes = [p for p in todas_patentes if p not in SWAY_PATENTES and p not in SCANIA_PATENTES]
-    s_sway=stats_modelo(SWAY_PATENTES); s_scania=stats_modelo(SCANIA_PATENTES); s_stralis=stats_modelo(stralis_patentes)
-    tc1,tc2,tc3 = st.columns(3)
-    for col_t,modelo,img_url,s,pats_label in [
-        (tc1,'S-Way',IVECO_URL,s_sway,'AH522SI · AH862UB · AH938VO · AH842GQ'),
-        (tc2,'Scania',SCANIA_URL,s_scania,'AD247MQ · AE423IW'),
-        (tc3,'Stralis',STRALIS_URL,s_stralis,'Resto de la flota')]:
-        with col_t:
-            st.markdown(f'<div class="truck-img-box"><img src="{img_url}" alt="{modelo}" /></div>', unsafe_allow_html=True)
-            st.markdown('<br>', unsafe_allow_html=True)
-            sc1,sc2,sc3=st.columns(3)
-            sc1.metric(f'{modelo} — L/100km',f"{s['l100']:.1f}" if s['l100']>0 else '—')
-            sc2.metric('Unidades',f"{s['n']}")
-            sc3.metric(f'Litros {anio_sel}',f"{s['lts']:,.0f}" if s['lts']>0 else '—')
-            st.caption(f"Patentes: {pats_label} | {s['kms']:,.0f} km")
-    st.divider()
-    st.markdown(f'<div class="sec-title">Ranking de Eficiencia — {anio_sel}</div>', unsafe_allow_html=True)
-    rcol1,rcol2 = st.columns(2)
-    def render_ranking(col,titulo,df_rank,color_fn):
-        with col:
-            st.markdown(f'**{titulo}**')
-            if df_rank.empty: st.info('Sin datos.'); return
-            vmin,vmax=df_rank['L100KM'].min(),df_rank['L100KM'].max()
-            rh='<div style="background:#1e293b;border-radius:12px;padding:16px;">'
-            rh+='<div style="font-size:.72rem;display:flex;justify-content:space-between;color:#94a3b8;margin-bottom:6px;"><span>Unidad</span><span>L/100km</span></div>'
-            for i,(_,r) in enumerate(df_rank.iterrows(),1):
-                v=r['L100KM']; pct=int((v-vmin)/(vmax-vmin)*100) if vmax!=vmin else 50; cb=color_fn(i)
-                rh+=(f'<div class="rank-row"><div class="rank-num">#{i}</div><div class="rank-dom">{r["DOMINIO"]}</div>'
-                     f'<div class="rank-bar-bg"><div class="rank-bar" style="width:{pct}%;background:{cb}"></div></div>'
-                     f'<div class="rank-val" style="color:{cb}">{v:.2f}</div></div>')
-            rh+='</div>'
-            st.markdown(rh, unsafe_allow_html=True)
-    if 'DOMINIO' in df.columns and 'L100KM' in df.columns:
-        base=df[df['L100KM']>0].groupby('DOMINIO')['L100KM'].mean().round(2).reset_index()
-        render_ranking(rcol1,'TOP 10 más eficientes (menor L/100km)',base.sort_values('L100KM').head(10),
-                       lambda i:'#22c55e' if i<=3 else ('#f59e0b' if i<=6 else '#ef4444'))
-        render_ranking(rcol2,'TOP 10 menos eficientes (mayor L/100km)',base.sort_values('L100KM',ascending=False).head(10),
-                       lambda i:'#ef4444' if i<=3 else ('#f59e0b' if i<=6 else '#22c55e'))
-    st.divider()
-    st.markdown(f'<div class="sec-title">📊 Índice de Eficiencia Relativa (IER v4) — {anio_sel}</div>', unsafe_allow_html=True)
-    tiene_vel       = total_excesos>0
-    tiene_carga_ier = (not df_ier.empty and 'PESO_TON' in df_ier.columns and df_ier['PESO_TON'].sum()>0)
-    pond_txt = (
-        f"<b>40%</b> L/100km &nbsp;·&nbsp; "
-        f"<b>40%</b> ton·km/L {'📦' if tiene_carga_ier else '⚠️ sin datos'} &nbsp;·&nbsp; "
-        f"<b>10%</b> KM totales &nbsp;·&nbsp; "
-        f"<b>10%</b> Severidad vel. {'✅' if tiene_vel else '⚠️'}"
-    )
-    st.markdown(f"""<div class="ier-info-box">
-    <b>¿Qué es el IER v5?</b> Métrica estadísticamente justa: cada camión se compara <b>solo contra el promedio de su propio modelo</b> — Stralis vs Stralis, S‑Way vs S‑Way, Scania vs Scania.<br>
-    <b>Scoring:</b> Z-Score + Tanh. El promedio del grupo obtiene IER ≈ 100. Mayor IER = mejor rendimiento relativo.<br>
-    <b>Velocidad:</b> mide <b>severidad promedio</b> (km/h sobre el límite en promedio) — no cantidad de eventos. Ir siempre a 89 pesa menos que ir pocas veces a 95.<br>
-    <b>Ponderación:</b>&nbsp;{pond_txt}<br>
-    <b>Escala:</b>&nbsp;🟢 Eficiente ≥105 &nbsp;·&nbsp; 🟡 Normal 95–105 &nbsp;·&nbsp; 🟠 Atención 85–95 &nbsp;·&nbsp; 🔴 Crítico &lt;85
-    </div>""", unsafe_allow_html=True)
-    with st.expander('ℹ️ ¿Por qué Z-Score + Tanh? (metodología)'):
-        st.markdown("""<div class="ier-method-box">
-        <b>Problema del ratio simple:</b><br>
-        • Un camión 50% mejor: ratio=2.0 | Un camión 50% peor: ratio=0.67 — asimetría injusta<br><br>
-        <b>Solución — Z-Score + Tanh:</b><br>
-        Paso 1 — Z = (valor − promedio_modelo) / desv.std_modelo<br>
-        Paso 2 — Ajuste de dirección (consumo bajo=bueno → invertir z)<br>
-        Paso 3 — score = 1.0 + 1.5 × tanh(0.4 × z)<br>
-        &nbsp;&nbsp;→ z=0 → score=1.0 → IER=100 | z=+1 → score≈1.57 | z=−1 → score≈0.43
-        </div>""", unsafe_allow_html=True)
-    if not df_ier.empty:
-        cats=df_ier['CLASIFICACION'].value_counts()
-        ic1,ic2,ic3,ic4=st.columns(4)
-        ic1.metric('🟢 Eficiente',int(cats.get('🟢 Eficiente',0)),'IER ≥ 105')
-        ic2.metric('🟡 Normal',int(cats.get('🟡 Normal',0)),'IER 95–105')
-        ic3.metric('🟠 Atención',int(cats.get('🟠 Atención',0)),'IER 85–95')
-        ic4.metric('🔴 Crítico',int(cats.get('🔴 Crítico',0)),'IER < 85')
-        st.markdown('<br>', unsafe_allow_html=True)
-        def ier_bar_color(v):
-            if v>=105: return '#22c55e'
-            elif v>=95: return '#f59e0b'
-            elif v>=85: return '#f97316'
-            else: return '#ef4444'
-        df_ier_sorted = df_ier.sort_values(['MODELO','IER'],ascending=[True,False])
-        fig_ier=go.Figure()
-        MODELO_COLOR={'S-Way':'#60a5fa','Scania':'#f97316','Stralis':'#a78bfa'}
-        for modelo in MODELO_COLOR:
-            subset=df_ier_sorted[df_ier_sorted['MODELO']==modelo]
-            if subset.empty: continue
-            hover=[]
-            for _,row in subset.iterrows():
-                tkml_txt=(f"Carga: {row['TONKML']:.1f} ton·km/L (prom: {row['TONKML_MOD']:.1f})" if row['TONKML']>0 else "Carga: sin datos")
-                severidad = row.get('SEVERIDAD', 0)
-                hover.append(f"<b>{row['DOMINIO']}</b> ({row['MODELO']})<br>IER: <b>{row['IER']:.1f}</b> — {row['CLASIFICACION']}<br>"
-                             f"L/100km: {row['L100KM']:.2f} (prom {row['MODELO']}: {row['L100KM_MOD']:.2f}) score: {row['SCORE_CONSUMO']:.2f}<br>"
-                             f"Vel. severidad: {severidad:.0f} km/h acum. · {int(row['EXCESOS'])} eventos · score: {row['SCORE_VEL']:.2f}<br>"
-                             f"Vel. máx: {row['VEL_MAX']:.0f} km/h<br>KM total: {row['KM']:,.0f}  score: {row['SCORE_KM']:.2f}<br>"
-                             f"{tkml_txt}  score: {row['SCORE_CARGA']:.2f}")
-            fig_ier.add_trace(go.Bar(y=subset['DOMINIO'],x=subset['IER'],name=modelo,orientation='h',
-                marker=dict(color=[ier_bar_color(v) for v in subset['IER']],line=dict(color='rgba(255,255,255,0.15)',width=1)),
-                text=[f"{v:.1f}" for v in subset['IER']],textposition='outside',textfont=dict(color='#e2e8f0',size=10),
-                hovertemplate='%{customdata}<extra></extra>',customdata=hover))
-        ier_min=max(50,df_ier_sorted['IER'].min()-10); ier_max=min(175,df_ier_sorted['IER'].max()+25)
-        fig_ier.add_vline(x=100,line_dash='solid',line_color='#f59e0b',line_width=2.5,
-                          annotation_text='Base 100',annotation_position='top',annotation_font_color='#fbbf24',annotation_font_size=11)
-        fig_ier.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),barmode='overlay',
-            xaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text='IER  (100 = promedio de su modelo)',font=dict(color='#64748b')),range=[ier_min,ier_max]),
-            yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8',size=10),categoryorder='array',categoryarray=df_ier_sorted['DOMINIO'].tolist()),
-            height=max(380,len(df_ier_sorted)*44),margin=dict(l=10,r=130,t=60,b=30),showlegend=False)
-        st.plotly_chart(fig_ier, use_container_width=True)
-        st.caption('Verde = mejor que su modelo · Rojo = peor · Línea amarilla = base 100 · Hover para detalle completo')
-        with st.expander('📋 Ver tabla detallada IER (todos los componentes)'):
-            show_cols=['DOMINIO','MODELO','IER','CLASIFICACION','L100KM','L100KM_MOD',
-                       'EXCESOS','SEVERIDAD','SEVERIDAD_MOD','VEL_MAX','KM','PESO_TON','TONKML','TONKML_MOD',
-                       'SCORE_CONSUMO','SCORE_KM','SCORE_VEL','SCORE_CARGA']
-            ier_show=df_ier[[c for c in show_cols if c in df_ier.columns]].copy()
-            col_rename={'DOMINIO':'Patente','MODELO':'Modelo','IER':'IER','CLASIFICACION':'Clasificación',
-                'L100KM':'L/100km','L100KM_MOD':'Prom L/100km',
-                'EXCESOS':f'Cant. Excesos >{LIMITE_VELOCIDAD}km/h',
-                'SEVERIDAD':'Severidad total (km/h acum.)','SEVERIDAD_MOD':'Sev. total prom mod.',
-                'VEL_MAX':'Vel. Máx (km/h)',
-                'KM':'KM total','PESO_TON':'Peso (ton)','TONKML':'ton·km/L','TONKML_MOD':'ton·km/L prom mod.',
-                'SCORE_CONSUMO':'S.Consumo (40%)','SCORE_KM':'S.KM (10%)','SCORE_VEL':'S.Vel (10%)','SCORE_CARGA':'S.Carga (40%)'}
-            ier_show=ier_show.rename(columns=col_rename)
-            for c in ['IER','L/100km','Prom L/100km','Severidad total (km/h acum.)','Sev. total prom mod.']:
-                if c in ier_show.columns: ier_show[c]=ier_show[c].round(1)
-            for c in ['S.Consumo (40%)','S.KM (10%)','S.Vel (10%)','S.Carga (40%)']:
-                if c in ier_show.columns: ier_show[c]=ier_show[c].round(3)
-            if 'KM total' in ier_show.columns: ier_show['KM total']=ier_show['KM total'].apply(lambda x:f'{x:,.0f}')
-            st.dataframe(ier_show, use_container_width=True, hide_index=True)
-    else:
-        st.info('Sin datos suficientes para calcular el IER.')
-    if not df_vel_filtrado.empty and 'DOMINIO' in df_vel_filtrado.columns:
-        st.divider()
-        st.markdown(f'<div class="sec-title">🚨 Ranking Severidad Velocidad >{LIMITE_VELOCIDAD} km/h — {anio_sel}</div>', unsafe_allow_html=True)
-        st.caption(f'Métrica: suma total de km/h sobre el límite (frecuencia × magnitud). 5 eventos a 95 km/h (sum=35) es más grave que 10 eventos a 89 km/h (sum=10).')
-        vel_rank=(df_vel_filtrado.groupby('DOMINIO').agg(
-            CANTIDAD=('DOMINIO','count'),
-            VEL_MAX=('VELOCIDAD','max'),
-            VEL_PROM=('VELOCIDAD','mean'),
-            SEVERIDAD=('EXCESO_KMH','sum')
-        ).reset_index().sort_values('SEVERIDAD',ascending=False))
-        vel_rank['MODELO']=vel_rank['DOMINIO'].apply(asignar_modelo)
-        fig_vel=go.Figure([go.Bar(x=vel_rank['DOMINIO'],y=vel_rank['SEVERIDAD'].round(0),
-            marker_color=['#ef4444' if v==vel_rank['SEVERIDAD'].max() else '#f97316' for v in vel_rank['SEVERIDAD']],
-            text=vel_rank['SEVERIDAD'].round(0).astype(int),textposition='outside',textfont=dict(color='#e2e8f0',size=10),
-            hovertemplate='<b>%{x}</b><br>Severidad total: +%{y:.0f} km/h acumulados sobre límite<extra></extra>')])
-        fig_vel.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
-            xaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8',size=10),tickangle=-45),
-            yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text=f'km/h acumulados sobre {LIMITE_VELOCIDAD} km/h',font=dict(color='#64748b'))),
-            height=380,margin=dict(l=10,r=10,t=20,b=80),showlegend=False)
-        st.plotly_chart(fig_vel, use_container_width=True)
-        with st.expander('Ver tabla de excesos por unidad'):
-            vel_show=vel_rank[['DOMINIO','MODELO','SEVERIDAD','CANTIDAD','VEL_MAX','VEL_PROM']].copy()
-            vel_show.columns=['Patente','Modelo',f'Severidad total (km/h acum.)',f'Cant. eventos >{LIMITE_VELOCIDAD}km/h','Vel. Máx (km/h)','Vel. Prom (km/h)']
-            vel_show['Vel. Máx (km/h)']=vel_show['Vel. Máx (km/h)'].round(1)
-            vel_show['Vel. Prom (km/h)']=vel_show['Vel. Prom (km/h)'].round(1)
-            vel_show['Severidad total (km/h acum.)']=vel_show['Severidad total (km/h acum.)'].round(1)
-            st.dataframe(vel_show, use_container_width=True, hide_index=True)
-    st.divider()
-    with st.expander(f'Ver datos completos {anio_sel}'):
-        cols_s=[c for c in ['DOMINIO','MARCA','MODELO','FECHA','KM','LITROS','L100KM'] if c in df.columns]
-        st.dataframe(df[cols_s], use_container_width=True, height=380)
-    st.caption(f'Datos {anio_sel}: Google Sheets Expreso Diemar | Precio: {precio_fuente} | Excesos: satelital >{LIMITE_VELOCIDAD} km/h | Actualización cada 10 min')
-# ═══════════════════════════════════════════════════════════════════════════════
-#  PESTAÑA 2 — MODELO PREDICTIVO
-# ═══════════════════════════════════════════════════════════════════════════════
-elif pg == "Modelo Predictivo":
-    col_logo2,col_title2=st.columns([1,5])
-    with col_logo2: st.image(LOGO_URL, width=130)
-    with col_title2:
-        st.markdown("""<div style='padding:8px 0;'>
-        <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>Modelo Predictivo &mdash; LAD</div>
-        <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Entrenado con todo el histórico &middot; Regresión polinomial &middot; Simulador What-If</div>
-        </div>""", unsafe_allow_html=True)
-    st.markdown(f'<span class="price-badge">&#9981; Precio gasoil: <b>${precio_gasoil:,.0f}/L</b></span>&nbsp;&nbsp;<span style="font-size:.75rem;color:#64748b;">Fuente: {precio_fuente}</span>', unsafe_allow_html=True)
-    anos_en_hist=(sorted(df_full_clean['FECHA'].dt.year.unique().tolist()) if 'FECHA' in df_full_clean.columns else [])
-    anos_str=" · ".join(str(a) for a in anos_en_hist)
-    st.markdown(f'<div class="training-badge">🧠 Modelo entrenado con {n_meses_entrenamiento} meses históricos ({anos_str})</div>', unsafe_allow_html=True)
-    st.markdown('<br>', unsafe_allow_html=True)
-    hist=meses_hist_full.copy(); hist['T']=range(len(hist))
-    if len(hist)>=2:
-        X=hist['T'].values.reshape(-1,1); y_l100=hist['L100'].values; y_lts=hist['LITROS'].values
-        degree=min(2,len(hist)-1)
-        poly=PolynomialFeatures(degree=degree); Xp=poly.fit_transform(X)
-        model_l100=LinearRegression().fit(Xp,y_l100); model_lts=LinearRegression().fit(Xp,y_lts)
-        r2_l100=model_l100.score(Xp,y_l100)
-        residuals=y_l100-model_l100.predict(Xp); std_res=np.std(residuals)
-        t_max=hist['T'].max(); ultimo=hist['MES_PERIODO'].iloc[-1]
-        n_pred=max(3,12-ultimo.month)
-        t_fut=np.array(range(t_max+1,t_max+1+n_pred)).reshape(-1,1)
-        Xf=poly.transform(t_fut)
-        pred_l100=np.clip(model_l100.predict(Xf),0,100); pred_lts=np.clip(model_lts.predict(Xf),0,None)
-        meses_fut=[(ultimo+i+1).strftime('%b %Y') for i in range(n_pred)]
-        st.info(f'📐 Grado polinomial: {degree} | R² = {r2_l100:.3f} | σ residuos = {std_res:.2f} L/100km')
-        st.markdown(f'<div class="sec-title">Predicción meses restantes {ultimo.year} ({n_pred} meses)</div>', unsafe_allow_html=True)
-        n_kpi=min(4,n_pred); kpi_cols=st.columns(n_kpi)
-        for c,mes,l100_p,lts_p in zip(kpi_cols,meses_fut[:n_kpi],pred_l100[:n_kpi],pred_lts[:n_kpi]):
-            costo_p=lts_p*precio_gasoil
-            c.metric(label=f'Predicción {mes}',value=f'{l100_p:.2f} L/100km',delta=f'{lts_p:,.0f} L | ${costo_p/1e6:.2f}M')
-        if n_pred>4:
-            kpi_cols2=st.columns(min(4,n_pred-4))
-            for c,mes,l100_p,lts_p in zip(kpi_cols2,meses_fut[4:],pred_l100[4:],pred_lts[4:]):
-                costo_p=lts_p*precio_gasoil
-                c.metric(label=f'Predicción {mes}',value=f'{l100_p:.2f} L/100km',delta=f'{lts_p:,.0f} L | ${costo_p/1e6:.2f}M')
-        st.divider()
-        st.markdown('<div class="sec-title">Evolución histórica completa con Proyección</div>', unsafe_allow_html=True)
-        all_labels=[str(p) for p in hist['MES_PERIODO']]+meses_fut
-        all_hist=hist['L100'].tolist()+[None]*n_pred
-        all_pred=[None]*(len(hist)-1)+[float(hist['L100'].iloc[-1])]+[float(v) for v in pred_l100]
-        upper_vals=([None]*(len(hist)-1)+[float(hist['L100'].iloc[-1])+1.5*std_res]+[float(v)+1.5*std_res for v in pred_l100])
-        lower_vals=([None]*(len(hist)-1)+[float(hist['L100'].iloc[-1])-1.5*std_res]+[float(v)-1.5*std_res for v in pred_l100])
-        pred_start=len(hist)-1; pred_labels=all_labels[pred_start:]
-        upper_clean=[upper_vals[i] for i in range(pred_start,len(all_labels))]
-        lower_clean=[lower_vals[i] for i in range(pred_start,len(all_labels))]
-        unique_years=sorted(set(p.year for p in hist['MES_PERIODO']))
-        fig=go.Figure()
-        fig.add_trace(go.Scatter(x=pred_labels+pred_labels[::-1],y=upper_clean+lower_clean[::-1],fill='toself',fillcolor='rgba(59,130,246,0.15)',line=dict(color='rgba(0,0,0,0)'),name='Intervalo ±1.5σ',hoverinfo='skip'))
-        fig.add_trace(go.Scatter(x=pred_labels,y=upper_clean,mode='lines',line=dict(color='#3b82f6',width=1,dash='dot'),name='CI sup',hovertemplate='CI sup: %{y:.2f} L/100km<extra></extra>'))
-        fig.add_trace(go.Scatter(x=pred_labels,y=lower_clean,mode='lines',line=dict(color='#3b82f6',width=1,dash='dot'),name='CI inf',hovertemplate='CI inf: %{y:.2f} L/100km<extra></extra>'))
-        hist_x=[all_labels[i] for i,v in enumerate(all_hist) if v is not None]; hist_y=[v for v in all_hist if v is not None]
-        fig.add_trace(go.Scatter(x=hist_x,y=hist_y,mode='lines+markers',line=dict(color='#ef4444',width=2.5),marker=dict(size=7,color='#ef4444',line=dict(color='#fff',width=1.5)),name='Histórico',hovertemplate='%{x}<br>Real: <b>%{y:.2f} L/100km</b><extra></extra>'))
-        pred_x=[all_labels[i] for i,v in enumerate(all_pred) if v is not None]; pred_y=[v for v in all_pred if v is not None]
-        fig.add_trace(go.Scatter(x=pred_x,y=pred_y,mode='lines+markers',line=dict(color='#60a5fa',width=2.5,dash='dash'),marker=dict(size=9,color='#60a5fa',symbol='diamond',line=dict(color='#fff',width=1.5)),name='Predicción',hovertemplate='%{x}<br>Pred: <b>%{y:.2f} L/100km</b><extra></extra>'))
-        for yr in unique_years[1:]:
-            yr_label=f'Ene {yr}'
-            if yr_label in all_labels:
-                fig.add_vline(x=yr_label,line_width=1,line_dash='dot',line_color='#334155',annotation_text=str(yr),annotation_position='top',annotation_font_color='#64748b',annotation_font_size=10)
-        fig.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
-            legend=dict(bgcolor='rgba(15,23,42,0.8)',bordercolor='#334155',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
-            xaxis=dict(gridcolor='#1e293b',linecolor='#334155',tickfont=dict(color='#94a3b8',size=10),title=dict(text='Período',font=dict(color='#64748b')),tickangle=-45),
-            yaxis=dict(gridcolor='#1e293b',linecolor='#334155',tickfont=dict(color='#94a3b8',size=11),title=dict(text='L/100km',font=dict(color='#64748b'))),
-            height=450,margin=dict(l=10,r=10,t=50,b=60),hovermode='x unified')
-        st.plotly_chart(fig, use_container_width=True)
-        st.caption(f'±1.5σ intervalo de confianza | Línea roja = histórico ({n_meses_entrenamiento} meses) | Línea azul = predicción')
-        st.divider()
-        st.markdown('<div class="sec-title">🚨 Alerta de Desvío — Predicción vs. Real</div>', unsafe_allow_html=True)
-        if len(hist)>=3:
-            ultimo_real_mes=str(hist['MES_PERIODO'].iloc[-1]); ultimo_real_l100=float(hist['L100'].iloc[-1])
-            hist_prev=hist.iloc[:-1].copy(); hist_prev['T']=range(len(hist_prev))
-            degree_prev=min(2,len(hist_prev)-1)
-            poly_prev=PolynomialFeatures(degree=degree_prev); Xprev=poly_prev.fit_transform(hist_prev['T'].values.reshape(-1,1))
-            m_prev=LinearRegression().fit(Xprev,hist_prev['L100'].values)
-            X_pred_prev=poly_prev.transform(np.array([[len(hist_prev)]]).reshape(-1,1))
-            pred_ultimo=float(np.clip(m_prev.predict(X_pred_prev),0,100)[0])
-            desvio=ultimo_real_l100-pred_ultimo; desvio_pct=(desvio/pred_ultimo*100) if pred_ultimo>0 else 0
-            umbral=1.5*std_res
-            if abs(desvio)>umbral:
-                dir_txt='SUPERIOR' if desvio>0 else 'INFERIOR'
-                st.markdown(f'<div class="alert-box"><b>🚨 DESVÍO DETECTADO — {ultimo_real_mes}</b><br>Consumo real: <b>{ultimo_real_l100:.2f} L/100km</b> &nbsp;|&nbsp; Predicción: <b>{pred_ultimo:.2f} L/100km</b><br>Desvío: <b>{desvio:+.2f} L/100km ({desvio_pct:+.1f}%)</b> — {dir_txt} al intervalo esperado (±{umbral:.2f})</div>', unsafe_allow_html=True)
-            else:
-                st.markdown(f'<div class="alert-ok"><b>✅ Sin desvío — {ultimo_real_mes}</b><br>Consumo real: <b>{ultimo_real_l100:.2f} L/100km</b> &nbsp;|&nbsp; Predicción: <b>{pred_ultimo:.2f} L/100km</b><br>Desvío: <b>{desvio:+.2f} L/100km ({desvio_pct:+.1f}%)</b> — dentro del intervalo esperado (±{umbral:.2f})</div>', unsafe_allow_html=True)
-        st.divider()
-        st.markdown('<div class="sec-title">🎨 Simulador What-If</div>', unsafe_allow_html=True)
-        delta_precio_pct=st.slider('💸 Variación precio combustible (%)',min_value=-30,max_value=50,value=0,step=1)
-        precio_sim=precio_gasoil*(1+delta_precio_pct/100)
-        wf1,wf2=st.columns(2)
-        with wf1:
-            st.markdown(f'<div class="kpi-card kpi-amber"><div class="kpi-label">Precio Simulado</div><div class="kpi-value">${precio_sim:,.0f}/L</div><div class="kpi-sub">{delta_precio_pct:+.1f}% vs hoy</div></div>', unsafe_allow_html=True)
-        with wf2:
-            costo_sim_m1=pred_lts[0]*precio_sim/1e6; costo_base_m1=pred_lts[0]*precio_gasoil/1e6; diff_costo=costo_sim_m1-costo_base_m1
-            color_wf2='kpi-red' if diff_costo>0 else 'kpi-green'
-            st.markdown(f'<div class="kpi-card {color_wf2}"><div class="kpi-label">Costo {meses_fut[0]}</div><div class="kpi-value">${costo_sim_m1:.2f}M</div><div class="kpi-sub">{diff_costo:+.2f}M vs base</div></div>', unsafe_allow_html=True)
-        cost_df=pd.DataFrame({'Mes':meses_fut,'L/100km pred.':[round(v,2) for v in pred_l100],'Litros est.':[round(v,0) for v in pred_lts],
-            'Costo base M$':[round(v*precio_gasoil/1e6,2) for v in pred_lts],'Costo simulado M$':[round(v*precio_sim/1e6,2) for v in pred_lts],
-            'Dif. M$':[round(v*(precio_sim-precio_gasoil)/1e6,2) for v in pred_lts]})
-        st.dataframe(cost_df, use_container_width=True, hide_index=True)
-    else:
-        st.info('Se necesitan al menos 2 meses de datos históricos para el modelo predictivo.')
-    st.caption(f'Modelo entrenado con {n_meses_entrenamiento} meses | Precio: {precio_fuente} | Actualización cada 10 min')
-# ═══════════════════════════════════════════════════════════════════════════════
-#  PESTAÑA 3 — ANÁLISIS POR PATENTE
-# ═══════════════════════════════════════════════════════════════════════════════
-elif pg == "Análisis por Patente":
-    col_logo3,col_title3=st.columns([1,5])
-    with col_logo3: st.image(LOGO_URL, width=130)
-    with col_title3:
-        st.markdown(f"""<div style='padding:8px 0;'>
-        <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>Análisis por Patente — {anio_sel}</div>
-        <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Consumo · IER v4 · Excesos velocidad · Promedios</div>
-        </div>""", unsafe_allow_html=True)
-    if df.empty or 'DOMINIO' not in df.columns: st.warning('Sin datos disponibles.'); st.stop()
-    resumen=df.groupby('DOMINIO').agg(LITROS_TOTAL=('LITROS','sum'),KM_TOTAL=('KM','sum'),MESES=('MES_PERIODO','nunique')).reset_index()
-    resumen['L100KM_PROM']=(resumen['LITROS_TOTAL']/resumen['KM_TOTAL'].replace(0,np.nan)*100).round(2)
-    resumen['LITROS_PROM_MES']=(resumen['LITROS_TOTAL']/resumen['MESES'].replace(0,np.nan)).round(0)
-    resumen=resumen[resumen['KM_TOTAL']>0].sort_values('L100KM_PROM',ascending=False)
-    resumen['MODELO']=resumen['DOMINIO'].apply(asignar_modelo)
-    if not df_ier.empty:
-        resumen=resumen.merge(df_ier[['DOMINIO','IER','CLASIFICACION','EXCESOS','VEL_MAX']],on='DOMINIO',how='left')
-    else:
-        resumen['IER']='—'; resumen['CLASIFICACION']='—'; resumen['EXCESOS']=0; resumen['VEL_MAX']=0
-    if resumen.empty: st.warning('Sin datos suficientes.'); st.stop()
-    patente_max=resumen.iloc[0]; patente_min=resumen.iloc[-1]
-    st.markdown(f'<div class="sec-title">⚡ Destacados {anio_sel}</div>', unsafe_allow_html=True)
-    hc1,hc2=st.columns(2)
-    with hc1:
-        st.markdown(f'<div class="highlight-max"><b>🔴 Mayor consumo — {patente_max["DOMINIO"]}</b> <span style="color:#94a3b8;font-size:.8rem;">({patente_max["MODELO"]})</span><br>Promedio: <b>{patente_max["L100KM_PROM"]:.2f} L/100km</b> &nbsp;|&nbsp; Total: <b>{patente_max["LITROS_TOTAL"]:,.0f} L</b> &nbsp;|&nbsp; {patente_max["KM_TOTAL"]:,.0f} km &nbsp;|&nbsp; {int(patente_max["MESES"])} meses activa</div>', unsafe_allow_html=True)
-    with hc2:
-        st.markdown(f'<div class="highlight-min"><b>🟢 Menor consumo — {patente_min["DOMINIO"]}</b> <span style="color:#94a3b8;font-size:.8rem;">({patente_min["MODELO"]})</span><br>Promedio: <b>{patente_min["L100KM_PROM"]:.2f} L/100km</b> &nbsp;|&nbsp; Total: <b>{patente_min["LITROS_TOTAL"]:,.0f} L</b> &nbsp;|&nbsp; {patente_min["KM_TOTAL"]:,.0f} km &nbsp;|&nbsp; {int(patente_min["MESES"])} meses activa</div>', unsafe_allow_html=True)
-    st.divider()
-    st.markdown(f'<div class="sec-title">Promedio L/100km por Patente — {anio_sel}</div>', unsafe_allow_html=True)
-    colors_bar=[('#ef4444' if r['DOMINIO']==patente_max['DOMINIO'] else ('#22c55e' if r['DOMINIO']==patente_min['DOMINIO'] else '#3b82f6')) for _,r in resumen.iterrows()]
-    fig_bar=go.Figure([go.Bar(x=resumen['DOMINIO'],y=resumen['L100KM_PROM'],marker_color=colors_bar,
-        text=resumen['L100KM_PROM'].apply(lambda v:f'{v:.1f}'),textposition='outside',textfont=dict(color='#e2e8f0',size=10),
-        hovertemplate='<b>%{x}</b><br>L/100km: %{y:.2f}<extra></extra>')])
-    promedio_flota=resumen['L100KM_PROM'].mean()
-    fig_bar.add_hline(y=promedio_flota,line_dash='dot',line_color='#f59e0b',line_width=2,annotation_text=f'Promedio flota: {promedio_flota:.2f}',annotation_position='top right',annotation_font_color='#fbbf24',annotation_font_size=11)
-    fig_bar.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
-        xaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8',size=10),tickangle=-45),
-        yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text='L/100km',font=dict(color='#64748b'))),
-        height=420,margin=dict(l=10,r=10,t=30,b=80),showlegend=False)
-    st.plotly_chart(fig_bar, use_container_width=True)
-    st.caption('🔴 Mayor consumo · 🟢 Menor consumo · 🔵 Resto · Línea amarilla = promedio flota')
-    st.divider()
-    st.markdown(f'<div class="sec-title">Consumo Mensual por Patente (L/100km) — {anio_sel}</div>', unsafe_allow_html=True)
-    if 'MES_PERIODO' in df.columns:
-        pivot=df[df['L100KM']>0].groupby(['DOMINIO','MES_PERIODO'])['L100KM'].mean().round(2).reset_index()
-        pivot['MES_STR']=pivot['MES_PERIODO'].astype(str)
-        pivot_wide=pivot.pivot(index='DOMINIO',columns='MES_STR',values='L100KM')
-        pivot_wide=pivot_wide.reindex(index=resumen['DOMINIO'].tolist()).dropna(how='all')
-        if not pivot_wide.empty:
-            z_vals=pivot_wide.values.tolist(); x_vals=list(pivot_wide.columns); y_vals=list(pivot_wide.index)
-            text_vals=[]
-            for row_data in z_vals:
-                row_text=[]
-                for v in row_data:
-                    try: row_text.append(f'{float(v):.1f}' if v is not None and not np.isnan(float(v)) else '')
-                    except: row_text.append('')
-                text_vals.append(row_text)
-            fig_heat=go.Figure(go.Heatmap(z=z_vals,x=x_vals,y=y_vals,text=text_vals,texttemplate='%{text}',
-                colorscale=[[0.0,'#052e16'],[0.35,'#16a34a'],[0.65,'#f59e0b'],[1.0,'#7f1d1d']],
-                colorbar=dict(title=dict(text='L/100km',font=dict(color='#94a3b8')),tickfont=dict(color='#94a3b8'),bgcolor='rgba(0,0,0,0)'),
-                hovertemplate='Patente: <b>%{y}</b><br>Mes: %{x}<br>L/100km: <b>%{z:.2f}</b><extra></extra>'))
-            fig_heat.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
-                xaxis=dict(tickfont=dict(color='#94a3b8',size=10),tickangle=-45,side='bottom'),
-                yaxis=dict(tickfont=dict(color='#94a3b8',size=10)),height=max(300,len(y_vals)*40),margin=dict(l=10,r=10,t=20,b=60))
-            st.plotly_chart(fig_heat, use_container_width=True)
-    st.divider()
-    st.markdown('<div class="sec-title">🔍 Detalle Individual por Patente</div>', unsafe_allow_html=True)
-    pat_sel=st.selectbox('Seleccioná una patente para ver su evolución',resumen['DOMINIO'].tolist())
-    if pat_sel:
-        df_pat=df[df['DOMINIO']==pat_sel].copy()
-        if 'MES_PERIODO' in df_pat.columns:
-            df_pat_mes=df_pat.groupby('MES_PERIODO').agg(LITROS=('LITROS','sum'),KM=('KM','sum')).reset_index().sort_values('MES_PERIODO')
-            df_pat_mes['L100']=(df_pat_mes['LITROS']/df_pat_mes['KM'].replace(0,np.nan)*100).round(2)
-            df_pat_mes['MES_STR']=df_pat_mes['MES_PERIODO'].astype(str)
-            l100_prom_pat=df_pat_mes['L100'].mean(); lts_total_pat=df_pat_mes['LITROS'].sum(); kms_total_pat=df_pat_mes['KM'].sum()
-            marca_pat=df_pat['MARCA'].iloc[0] if 'MARCA' in df_pat.columns else '—'
-            modelo_pat=df_pat['MODELO'].iloc[0] if 'MODELO' in df_pat.columns else '—'
-            pk1,pk2,pk3,pk4,pk5=st.columns(5)
-            pk1.metric('Patente',pat_sel); pk2.metric('Marca',marca_pat); pk3.metric('Modelo',modelo_pat)
-            pk4.metric('L/100km promedio',f'{l100_prom_pat:.2f}'); pk5.metric('Litros totales',f'{lts_total_pat:,.0f}')
-            if not df_ier.empty and pat_sel in df_ier['DOMINIO'].values:
-                ier_row=df_ier[df_ier['DOMINIO']==pat_sel].iloc[0]
-                st.markdown('<div class="sec-title">📊 Índice de Eficiencia Relativa (IER v5)</div>', unsafe_allow_html=True)
-                ier_v=ier_row['IER']
-                sc_color=('#22c55e' if ier_v>=105 else ('#f59e0b' if ier_v>=95 else ('#f97316' if ier_v>=85 else '#ef4444')))
-                ia1,ia2,ia3=st.columns([1,2,2])
-                with ia1:
-                    st.markdown(f'<div class="ier-gauge-wrap"><div class="kpi-label">IER v5</div><div class="ier-score-big" style="color:{sc_color};">{ier_v:.1f}</div><div class="ier-clasif">{ier_row["CLASIFICACION"]}</div><div style="font-size:.72rem;color:#64748b;margin-top:6px;">base 100 = prom. {modelo_pat}</div></div>', unsafe_allow_html=True)
-                with ia2:
-                    st.markdown('<div style="font-size:.8rem;color:#94a3b8;font-weight:600;margin-bottom:6px;">Componentes del IER (40/40/10/10)</div>', unsafe_allow_html=True)
-                    def comp_bar(label,score,peso):
-                        pct=min(int(score*50),100); bc='#22c55e' if score>=1 else '#ef4444'
-                        st.markdown(f'<div class="ier-comp-row"><div class="ier-comp-label">{label} <span style="color:#475569;">({peso}%)</span></div><div class="ier-comp-bar-bg"><div class="ier-comp-bar" style="width:{pct}%;background:{bc}"></div></div><div class="ier-comp-val" style="color:{bc};">{score*100:.0f}</div></div>', unsafe_allow_html=True)
-                    comp_bar('⛽ L/100km',ier_row['SCORE_CONSUMO'],40)
-                    comp_bar('📦 ton·km/L',ier_row['SCORE_CARGA'],40)
-                    comp_bar('🛣️ KM totales',ier_row['SCORE_KM'],10)
-                    comp_bar(f'🚨 Severidad vel.',ier_row['SCORE_VEL'],10)
-                with ia3:
-                    st.markdown(f'<div style="font-size:.8rem;color:#94a3b8;font-weight:600;margin-bottom:6px;">Esta unidad vs. promedio {modelo_pat}</div>', unsafe_allow_html=True)
-                    delta_l100=ier_row['L100KM']-ier_row['L100KM_MOD']
-                    severidad_u = ier_row.get('SEVERIDAD', 0)
-                    severidad_m = ier_row.get('SEVERIDAD_MOD', 0)
-                    delta_sev = severidad_u - severidad_m
-                    st.metric('L/100km',f"{ier_row['L100KM']:.2f}",f"{delta_l100:+.2f} vs prom. {modelo_pat} ({ier_row['L100KM_MOD']:.2f})",delta_color='inverse')
-                    st.metric(f'Severidad vel. (km/h acum. sobre {LIMITE_VELOCIDAD})',f"{severidad_u:.0f}",f"{delta_sev:+.0f} vs prom. {modelo_pat} ({severidad_m:.0f})",delta_color='inverse')
-                    st.metric(f'Eventos >{LIMITE_VELOCIDAD} km/h',f"{int(ier_row['EXCESOS'])} eventos",'ref. — la severidad usa km/h acumulados')
-                    if ier_row.get('PESO_TON',0)>0:
-                        delta_tkml=ier_row['TONKML']-ier_row['TONKML_MOD']
-                        st.metric('📦 ton·km/L',f"{ier_row['TONKML']:.1f}",f"{delta_tkml:+.1f} vs prom. {modelo_pat} ({ier_row['TONKML_MOD']:.1f})",delta_color='normal')
-                    else:
-                        st.metric('📦 ton·km/L','sin datos','score neutral (1.0)')
-            df_vel_pat=(df_vel_filtrado[df_vel_filtrado['DOMINIO']==pat_sel] if not df_vel_filtrado.empty else pd.DataFrame())
-            if not df_vel_pat.empty:
-                st.markdown(f'<div class="sec-title">🚨 Excesos de Velocidad >{LIMITE_VELOCIDAD} km/h — {pat_sel}</div>', unsafe_allow_html=True)
-                severidad_pat = df_vel_pat['EXCESO_KMH'].sum() if 'EXCESO_KMH' in df_vel_pat.columns else 0
-                exceso_prom_pat = df_vel_pat['EXCESO_KMH'].mean() if 'EXCESO_KMH' in df_vel_pat.columns else 0
-                vp1,vp2,vp3,vp4=st.columns(4)
-                vp1.metric('Eventos totales',len(df_vel_pat))
-                vp2.metric('Severidad total',f"{severidad_pat:.0f} km/h acum.",f"promedio por evento: +{exceso_prom_pat:.1f} km/h")
-                vp3.metric('Vel. máxima',f"{df_vel_pat['VELOCIDAD'].max():.0f} km/h",f"+{df_vel_pat['VELOCIDAD'].max()-LIMITE_VELOCIDAD:.0f} km/h sobre límite")
-                vp4.metric('Vel. promedio en exceso',f"{df_vel_pat['VELOCIDAD'].mean():.1f} km/h")
-            st.divider()
-            fig_pat=go.Figure()
-            fig_pat.add_trace(go.Bar(x=df_pat_mes['MES_STR'],y=df_pat_mes['LITROS'],name='Litros',marker_color='rgba(59,130,246,0.5)',yaxis='y2',hovertemplate='%{x}<br>Litros: <b>%{y:,.0f}</b><extra></extra>'))
-            fig_pat.add_trace(go.Scatter(x=df_pat_mes['MES_STR'],y=df_pat_mes['L100'],name='L/100km',mode='lines+markers',line=dict(color='#ef4444',width=2.5),marker=dict(size=8,color='#ef4444',line=dict(color='#fff',width=1.5)),hovertemplate='%{x}<br>L/100km: <b>%{y:.2f}</b><extra></extra>'))
-            fig_pat.add_hline(y=l100_prom_pat,line_dash='dot',line_color='#f59e0b',annotation_text=f'Prom: {l100_prom_pat:.2f}',annotation_font_color='#fbbf24')
-            fig_pat.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
-                xaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8',size=10),tickangle=-30),
-                yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text='L/100km',font=dict(color='#ef4444'))),
-                yaxis2=dict(overlaying='y',side='right',tickfont=dict(color='#3b82f6'),title=dict(text='Litros',font=dict(color='#3b82f6')),showgrid=False),
-                legend=dict(bgcolor='rgba(15,23,42,0.8)',bordercolor='#334155',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
-                height=370,margin=dict(l=10,r=50,t=40,b=50))
-            st.plotly_chart(fig_pat, use_container_width=True)
-            with st.expander(f'Ver tabla mensual — {pat_sel}'):
-                df_show=df_pat_mes[['MES_STR','LITROS','KM','L100']].rename(columns={'MES_STR':'Mes','LITROS':'Litros','KM':'KM','L100':'L/100km'})
-                df_show['Litros']=df_show['Litros'].apply(lambda x:f'{x:,.0f}')
-                df_show['KM']=df_show['KM'].apply(lambda x:f'{x:,.0f}')
-                st.dataframe(df_show, use_container_width=True, hide_index=True)
-    st.divider()
-    st.markdown(f'<div class="sec-title">Tabla Resumen — Todas las Patentes {anio_sel}</div>', unsafe_allow_html=True)
-    cols_show=['DOMINIO','MODELO','LITROS_TOTAL','KM_TOTAL','L100KM_PROM','LITROS_PROM_MES','MESES']
-    col_names=['Patente','Modelo','Litros Total','KM Total','L/100km Prom','Litros/Mes Prom','Meses Activa']
-    for c,n in [('IER','IER'),('CLASIFICACION','Clasificación IER'),(f'EXCESOS',f'Excesos >{LIMITE_VELOCIDAD}km/h'),('VEL_MAX','Vel. Máx (km/h)')]:
-        if c in resumen.columns: cols_show.append(c); col_names.append(n)
-    resumen_show=resumen[cols_show].copy(); resumen_show.columns=col_names
-    resumen_show['Litros Total']=resumen_show['Litros Total'].apply(lambda x:f'{x:,.0f}')
-    resumen_show['KM Total']=resumen_show['KM Total'].apply(lambda x:f'{x:,.0f}')
-    resumen_show['Litros/Mes Prom']=resumen_show['Litros/Mes Prom'].apply(lambda x:f'{x:,.0f}')
-    st.dataframe(resumen_show, use_container_width=True, hide_index=True)
-    st.caption(f'Datos {anio_sel} · Google Sheets Expreso Diemar · Actualización cada 10 min')
-# ═══════════════════════════════════════════════════════════════════════════════
-#  PESTAÑA 4 — DATOS OPERATIVOS
-# ═══════════════════════════════════════════════════════════════════════════════
-elif pg == "Datos Operativos":
-    col_logo4,col_title4=st.columns([1,5])
-    with col_logo4: st.image(LOGO_URL, width=130)
-    with col_title4:
-        st.markdown(f"""<div style='padding:8px 0;'>
-        <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>Datos Operativos</div>
-        <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Peso entregado por patente &middot; Ton·km/L &middot; Productividad de carga</div>
-        </div>""", unsafe_allow_html=True)
-    if df_carga_raw is None or df_carga_raw.empty:
-        st.warning('⚠️ No hay datos de carga disponibles. Verificá la conexión al sistema BI (reporte_hojas.xlsx).')
-        st.stop()
-    # Solo patentes LAD (las mismas del df de telemetría)
-    _patentes_ld = df['DOMINIO'].dropna().unique()
-    # Filtro temporal: respetar el rango Desde/Hasta del sidebar si está definido
-    _desde = st.session_state.get('desde_periodo', None)
-    _hasta = st.session_state.get('hasta_periodo', None)
-    if _desde is not None and _hasta is not None:
-        df_carga_anio = df_carga_raw[
-            (df_carga_raw['MES'] >= _desde) &
-            (df_carga_raw['MES'] <= _hasta) &
-            (df_carga_raw['DOMINIO'].isin(_patentes_ld))
-        ].copy() if not df_carga_raw.empty else pd.DataFrame()
-        _rango_txt = f'{_desde} a {_hasta}' if _desde != _hasta else f'{_desde}'
-    else:
-        df_carga_anio = df_carga_raw[
-            (df_carga_raw['MES'].apply(lambda p:p.year)==anio_sel) &
-            (df_carga_raw['DOMINIO'].isin(_patentes_ld))
-        ].copy() if not df_carga_raw.empty else pd.DataFrame()
-        _rango_txt = f'{anio_sel}'
-    if df_carga_anio.empty: st.warning(f'Sin datos de carga para {_rango_txt}.'); st.stop()
-    df_carga_anio['MES_STR']=df_carga_anio['MES'].astype(str)
-    df_carga_anio['MODELO']=df_carga_anio['DOMINIO'].apply(asignar_modelo)
-    st.markdown(f'<div class="sec-title">Resumen de Carga — {_rango_txt}</div>', unsafe_allow_html=True)
-    peso_total=df_carga_anio['PESO_TON'].sum(); n_pat_con_carga=df_carga_anio['DOMINIO'].nunique()
-    peso_prom_pat=peso_total/n_pat_con_carga if n_pat_con_carga>0 else 0; meses_con_carga=df_carga_anio['MES'].nunique()
-    def kpi2(cont,color,label,value,sub=''):
-        cont.markdown(f'<div class="kpi-card {color}"><div class="kpi-label">{label}</div><div class="kpi-value">{value}</div><div class="kpi-sub">{sub}</div></div>', unsafe_allow_html=True)
-    ck1,ck2,ck3,ck4=st.columns(4)
-    kpi2(ck1,'kpi-purple','📦 Peso Total Entregado',f'{peso_total:,.1f}',f'toneladas {_rango_txt}')
-    kpi2(ck2,'','🚛 Patentes con Carga',f'{n_pat_con_carga}',f'de {df["DOMINIO"].nunique()} activas')
-    kpi2(ck3,'kpi-green','📊 Prom. por Patente',f'{peso_prom_pat:,.1f}','toneladas período')
-    kpi2(ck4,'kpi-amber','📅 Meses con datos',f'{meses_con_carga}',f'{_rango_txt}')
-    st.divider()
-    st.markdown(f'<div class="sec-title">📦 Peso Entregado por Mes y Patente (toneladas) — {_rango_txt}</div>', unsafe_allow_html=True)
-    pivot_carga=(df_carga_anio.pivot_table(index='DOMINIO',columns='MES_STR',values='PESO_TON',aggfunc='sum',fill_value=0).reset_index())
-    pivot_carga['TOTAL']=pivot_carga.drop(columns='DOMINIO').sum(axis=1)
-    pivot_carga=pivot_carga.sort_values('TOTAL',ascending=False)
-    meses_cols=[c for c in pivot_carga.columns if c not in ['DOMINIO','TOTAL']]
-    if meses_cols:
-        z_vals=pivot_carga[meses_cols].values.tolist(); y_vals=pivot_carga['DOMINIO'].tolist()
-        txt_vals=[[f'{v:,.1f}' if v>0 else '' for v in row] for row in z_vals]
-        fig_heat_c=go.Figure(go.Heatmap(z=z_vals,x=meses_cols,y=y_vals,text=txt_vals,texttemplate='%{text}',
-            colorscale=[[0.0,'#1e293b'],[0.3,'#1d4ed8'],[0.65,'#7c3aed'],[1.0,'#be185d']],
-            colorbar=dict(title=dict(text='Ton',font=dict(color='#94a3b8')),tickfont=dict(color='#94a3b8'),bgcolor='rgba(0,0,0,0)'),
-            hovertemplate='Patente: <b>%{y}</b><br>Mes: %{x}<br>Peso: <b>%{z:,.1f} ton</b><extra></extra>'))
-        fig_heat_c.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
-            xaxis=dict(tickfont=dict(color='#94a3b8',size=10),tickangle=-45,side='bottom'),
-            yaxis=dict(tickfont=dict(color='#94a3b8',size=10)),height=max(300,len(y_vals)*40),margin=dict(l=10,r=10,t=20,b=60))
-        st.plotly_chart(fig_heat_c, use_container_width=True)
-    with st.expander('📋 Ver tabla completa de peso entregado (ton)'):
-        pivot_show=pivot_carga.copy()
-        for c in meses_cols+['TOTAL']: pivot_show[c]=pivot_show[c].apply(lambda x:f'{x:,.1f}' if x>0 else '—')
-        pivot_show=pivot_show.rename(columns={'DOMINIO':'Patente','TOTAL':'TOTAL año'})
-        st.dataframe(pivot_show, use_container_width=True, hide_index=True)
-    st.markdown(f'<div class="sec-title">Evolución Mensual de Peso Entregado por Patente — {_rango_txt}</div>', unsafe_allow_html=True)
-    COLORES_PAT=['#3b82f6','#f97316','#22c55e','#a855f7','#f43f5e','#06b6d4','#eab308','#84cc16']
-    fig_bar_c=go.Figure()
-    for i,(_,row) in enumerate(pivot_carga.iterrows()):
-        dom=row['DOMINIO']; vals=[row.get(m,0) for m in meses_cols]
-        fig_bar_c.add_trace(go.Bar(name=dom,x=meses_cols,y=vals,marker_color=COLORES_PAT[i%len(COLORES_PAT)],hovertemplate=f'<b>{dom}</b><br>%{{x}}: <b>%{{y:,.1f}} ton</b><extra></extra>'))
-    fig_bar_c.update_layout(barmode='stack',paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
-        xaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8',size=10),tickangle=-45),
-        yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text='Toneladas entregadas',font=dict(color='#64748b'))),
-        legend=dict(bgcolor='rgba(15,23,42,0.8)',bordercolor='#334155',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
-        height=420,margin=dict(l=10,r=10,t=50,b=70))
-    st.plotly_chart(fig_bar_c, use_container_width=True)
-    st.divider()
-    st.markdown(f'<div class="sec-title">📐 Detalle ton·km/L (Productividad de Carga) — {_rango_txt}</div>', unsafe_allow_html=True)
-    st.markdown("""<div class="ier-info-box"><b>¿Qué es ton·km/L?</b> Mide cuántas toneladas·kilómetro se transportan por cada litro de combustible.<br><b>Fórmula:</b> ton·km/L = Peso entregado (ton) × KM recorridos / Litros consumidos</div>""", unsafe_allow_html=True)
-    df_op=df[df['KM']>0].copy(); df_op['MES_STR']=df_op['FECHA'].dt.to_period('M').astype(str)
-    km_lts_mes=df_op.groupby(['DOMINIO','MES_STR']).agg(KM=('KM','sum'),LITROS=('LITROS','sum')).reset_index()
-    df_carga_str=df_carga_anio[['DOMINIO','MES_STR','PESO_TON']].copy()
-    tonkml_mes=km_lts_mes.merge(df_carga_str,on=['DOMINIO','MES_STR'],how='left')
-    tonkml_mes['PESO_TON']=tonkml_mes['PESO_TON'].fillna(0)
-    tonkml_mes['TONKML']=np.where((tonkml_mes['PESO_TON']>0)&(tonkml_mes['LITROS']>0),(tonkml_mes['PESO_TON']*tonkml_mes['KM'])/tonkml_mes['LITROS'],np.nan).round(2)
-    tonkml_mes['MODELO']=tonkml_mes['DOMINIO'].apply(asignar_modelo)
-    tkml_valid=tonkml_mes['TONKML'].dropna()
-    if not tkml_valid.empty:
-        t1,t2,t3,t4=st.columns(4)
-        tkml_prom=tkml_valid.mean(); tkml_max=tkml_valid.max(); tkml_min=tkml_valid.min()
-        dom_max=tonkml_mes.loc[tonkml_mes['TONKML'].idxmax(),'DOMINIO']; dom_min=tonkml_mes.loc[tonkml_mes['TONKML'].idxmin(),'DOMINIO']
-        kpi2(t1,'','📊 Promedio ton·km/L',f'{tkml_prom:.2f}','toda la flota')
-        kpi2(t2,'kpi-green',f'🏆 Mejor — {dom_max}',f'{tkml_max:.2f}','mayor productividad')
-        kpi2(t3,'kpi-red',f'⚠️ Peor — {dom_min}',f'{tkml_min:.2f}','menor productividad')
-        kpi2(t4,'kpi-purple','📦 Período cubierto',f'{tonkml_mes["MES_STR"].nunique()} meses',f'{_rango_txt}')
-    fig_tkml=go.Figure()
-    for i,dom in enumerate(tonkml_mes['DOMINIO'].unique()):
-        sub=tonkml_mes[tonkml_mes['DOMINIO']==dom].sort_values('MES_STR')
-        sub_valid=sub[sub['TONKML'].notna()]
-        if sub_valid.empty: continue
-        fig_tkml.add_trace(go.Scatter(x=sub_valid['MES_STR'],y=sub_valid['TONKML'],name=dom,mode='lines+markers',line=dict(color=COLORES_PAT[i%len(COLORES_PAT)],width=2.5),marker=dict(size=8,line=dict(color='#fff',width=1.5)),hovertemplate=f'<b>{dom}</b><br>%{{x}}: <b>%{{y:.2f}} ton·km/L</b><extra></extra>'))
-    if not tkml_valid.empty:
-        fig_tkml.add_hline(y=tkml_valid.mean(),line_dash='dot',line_color='#f59e0b',line_width=2,annotation_text=f'Promedio: {tkml_valid.mean():.2f}',annotation_position='top right',annotation_font_color='#fbbf24',annotation_font_size=11)
-    fig_tkml.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
-        xaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8',size=10),tickangle=-30),
-        yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text='ton·km/L',font=dict(color='#64748b'))),
-        legend=dict(bgcolor='rgba(15,23,42,0.8)',bordercolor='#334155',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
-        height=400,margin=dict(l=10,r=10,t=50,b=50))
-    st.plotly_chart(fig_tkml, use_container_width=True)
-    rank_tkml=tonkml_mes.groupby('DOMINIO').agg(PESO_TON=('PESO_TON','sum'),KM=('KM','sum'),LITROS=('LITROS','sum'),MODELO=('MODELO','first')).reset_index()
-    rank_tkml['TONKML_ANUAL']=np.where((rank_tkml['PESO_TON']>0)&(rank_tkml['LITROS']>0),(rank_tkml['PESO_TON']*rank_tkml['KM'])/rank_tkml['LITROS'],np.nan).round(2)
-    rank_tkml=rank_tkml[rank_tkml['TONKML_ANUAL'].notna()].sort_values('TONKML_ANUAL',ascending=True)
-    if not rank_tkml.empty:
-        fig_rank=go.Figure([go.Bar(y=rank_tkml['DOMINIO'],x=rank_tkml['TONKML_ANUAL'],orientation='h',
-            marker_color=['#22c55e' if v==rank_tkml['TONKML_ANUAL'].max() else ('#ef4444' if v==rank_tkml['TONKML_ANUAL'].min() else '#3b82f6') for v in rank_tkml['TONKML_ANUAL']],
-            text=[f'{v:.2f}' for v in rank_tkml['TONKML_ANUAL']],textposition='outside',textfont=dict(color='#e2e8f0',size=10),
-            hovertemplate='<b>%{y}</b><br>ton·km/L: <b>%{x:.2f}</b><extra></extra>')])
-        prom_r=rank_tkml['TONKML_ANUAL'].mean()
-        fig_rank.add_vline(x=prom_r,line_dash='dot',line_color='#f59e0b',line_width=2,annotation_text=f'Prom: {prom_r:.2f}',annotation_position='top',annotation_font_color='#fbbf24',annotation_font_size=11)
-        fig_rank.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
-            xaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text='ton·km/L acumulado año',font=dict(color='#64748b'))),
-            yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8',size=10)),
-            height=max(300,len(rank_tkml)*50+80),margin=dict(l=10,r=120,t=30,b=30),showlegend=False)
-        st.plotly_chart(fig_rank, use_container_width=True)
-    st.caption(f'Fuente: reporte_hojas.xlsx (BI Expreso) · Telemetría Google Sheets · Período {_rango_txt}')
+</head>
+<body>
+<div class="phone-frame">
+
+  <div class="alert" id="global-alert"></div>
+
+  <!-- SPLASH -->
+  <div class="screen active" id="screen-splash">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:24px; padding:40px;">
+      <div class="splash-logo">🏋️</div>
+      <div class="splash-title">Fit<span>Life</span></div>
+      <div class="splash-sub">Tu gimnasio, en tu bolsillo</div>
+      <div style="width:100%; margin-top:20px;">
+        <button class="btn-primary" onclick="goto('auth-choice')">Ingresar a la app</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- AUTH CHOICE -->
+  <div class="screen" id="screen-auth-choice">
+    <div class="auth-hero">
+      <div class="status-bar" style="padding:0 0 16px;"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+      <div class="auth-hero-tag">Bienvenido</div>
+      <h1>Entrena más<br><em>inteligente</em></h1>
+      <p>Tu app de gimnasio todo en uno</p>
+    </div>
+    <div style="padding: 32px 28px; flex: 1;">
+      <div class="step-title" style="font-size:20px;">¿Iniciar sesión o Registrarse?</div>
+      <div class="step-sub">Elegí cómo querés ingresar</div>
+
+      <div class="choice-card" onclick="goto('login')">
+        <div class="choice-card-icon">🔑</div>
+        <div class="choice-card-info">
+          <div class="choice-card-title">Iniciar sesión</div>
+          <div class="choice-card-sub">Ya tengo una cuenta</div>
+        </div>
+        <div class="choice-card-arrow">→</div>
+      </div>
+
+      <div class="choice-card" onclick="goto('register-mail')">
+        <div class="choice-card-icon">✨</div>
+        <div class="choice-card-info">
+          <div class="choice-card-title">Registrarse</div>
+          <div class="choice-card-sub">Crear cuenta nueva</div>
+        </div>
+        <div class="choice-card-arrow">→</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOGIN -->
+  <div class="screen" id="screen-login">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail">
+      <span>Iniciar sesión</span><span class="sep">›</span><span class="current">Ingresar credenciales</span>
+    </div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('auth-choice')">←</button>
+      <div class="top-nav-title">Iniciar sesión</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Ingresar credenciales</div>
+      <div class="step-sub">Usá el email y contraseña con los que te registraste</div>
+
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-input" type="email" placeholder="tucorreo@gmail.com" id="login-email" value="usuario@fitlife.com">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Contraseña</label>
+        <input class="form-input" type="password" placeholder="••••••••" id="login-pass" value="demo1234">
+      </div>
+
+      <button class="btn-primary" onclick="doLogin()">Iniciar sesión</button>
+      <p class="gap-info">Tip: usar <span class="text-green">vencida@test.com</span> simula cuota vencida</p>
+    </div>
+  </div>
+
+  <!-- CUOTA CHECK -->
+  <div class="screen" id="screen-cuota-check">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Login</span><span class="sep">›</span><span class="current">Verificando estado de cuota</span></div>
+    <div class="decision-screen">
+      <div class="decision-diamond">
+        <div class="decision-diamond-inner">
+          <div class="q-icon">💰</div>
+          <div class="q-text">¿Tiene cuota<br>al día?</div>
+        </div>
+      </div>
+      <div class="decision-context">Verificamos el estado de tu suscripción</div>
+      <div style="width:100%;" id="cuota-result">
+        <div class="spinner" style="margin: 0 auto;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RENOVAR -->
+  <div class="screen" id="screen-renovar-check">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Login</span><span class="sep">›</span><span>Cuota vencida</span><span class="sep">›</span><span class="current">¿Renovar?</span></div>
+    <div class="decision-screen">
+      <div class="decision-diamond">
+        <div class="decision-diamond-inner">
+          <div class="q-icon">🔄</div>
+          <div class="q-text">¿Renovar<br>suscripción?</div>
+        </div>
+      </div>
+      <div class="decision-context">Tu membresía venció. Renová tu plan para seguir accediendo al contenido</div>
+      <div class="decision-actions">
+        <button class="btn-danger" onclick="goto('access-denied')" style="margin-top:0;">No</button>
+        <button class="btn-primary" onclick="goto('payment-method')">Sí, renovar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- REGISTER -->
+  <div class="screen" id="screen-register-mail">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail">
+      <span>Registro</span><span class="sep">›</span><span class="current">Mail y contraseña</span><span class="sep">›</span><span>Confirmar mail</span><span class="sep">›</span><span>T&C</span><span class="sep">›</span><span>Plan</span><span class="sep">›</span><span>Pago</span>
+    </div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('auth-choice')">←</button>
+      <div class="top-nav-title">Crear cuenta</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Ingresar mail y contraseña</div>
+      <div class="step-sub">Empezamos con tus datos de acceso</div>
+
+      <div class="form-group">
+        <label class="form-label">Nombre completo</label>
+        <input class="form-input" type="text" placeholder="Juan García" id="reg-name" value="Santiago Estevez">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-input" type="email" placeholder="tucorreo@gmail.com" id="reg-email" value="santiago@fitlife.com">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Contraseña</label>
+        <input class="form-input" type="password" placeholder="••••••••" id="reg-pass" value="demo1234">
+      </div>
+
+      <button class="btn-primary" onclick="doRegister()">Continuar →</button>
+    </div>
+  </div>
+
+  <!-- SEND MAIL -->
+  <div class="screen" id="screen-send-mail">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail">
+      <span>Registro</span><span class="sep">›</span><span>Mail</span><span class="sep">›</span><span class="current">Enviando confirmación</span>
+    </div>
+    <div class="decision-screen">
+      <div class="bio-icon-big">📨</div>
+      <div class="step-title" style="text-align:center;">Enviar mail de confirmación</div>
+      <div class="decision-context">Te estamos enviando un correo a:</div>
+      <div class="mail-addr" id="sent-mail-addr" style="font-size:16px; text-align:center;">santiago@fitlife.com</div>
+      <div class="spinner" style="margin: 8px auto;"></div>
+    </div>
+  </div>
+
+  <!-- CONFIRM MAIL -->
+  <div class="screen" id="screen-confirm-mail">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail">
+      <span>Registro</span><span class="sep">›</span><span>Mail</span><span class="sep">›</span><span class="current">Confirmar mail</span>
+    </div>
+    <div class="top-nav">
+      <div class="top-nav-title">Confirmar mail</div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Confirmar mail</div>
+      <div class="step-sub">Revisá tu bandeja de entrada y confirmá el correo</div>
+
+      <div class="mail-card">
+        <div class="mail-icon">📧</div>
+        <div class="mail-status">Mail enviado a</div>
+        <div class="mail-addr" id="confirm-mail-addr">santiago@fitlife.com</div>
+      </div>
+
+      <div style="background:var(--bg-soft); border:1px dashed var(--border-strong); border-radius:10px; padding:14px; margin-bottom:24px;">
+        <div style="font-size:12px; color:var(--text-muted); margin-bottom:6px;">📥 Asunto</div>
+        <div style="font-size:13px; color:var(--text); margin-bottom:10px;">Confirmá tu cuenta FitLife</div>
+        <div style="font-size:12px; color:var(--text-muted);">Hacé click en el enlace del mail para verificar tu cuenta</div>
+      </div>
+
+      <button class="btn-primary" onclick="goto('terms')">Ya confirmé mi mail ✓</button>
+      <button class="btn-secondary" onclick="showAlert('Mail reenviado', 'success')">Reenviar mail</button>
+    </div>
+  </div>
+
+  <!-- TERMS -->
+  <div class="screen" id="screen-terms">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail">
+      <span>Registro</span><span class="sep">›</span><span>Mail</span><span class="sep">›</span><span class="current">Firmar T&C</span>
+    </div>
+    <div class="top-nav">
+      <div class="top-nav-title">Términos y condiciones</div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Firmar términos y condiciones</div>
+      <div class="step-sub">Leé y aceptá los términos para continuar</div>
+
+      <div class="terms-box">
+        <h4>1. Política de privacidad</h4>
+        <p>Tus datos biométricos, de salud y personales son confidenciales. No se comparten con terceros sin tu consentimiento.</p>
+        <h4>2. Condiciones de membresía</h4>
+        <p>La membresía se renueva automáticamente cada mes. Podés cancelar en cualquier momento desde tu perfil.</p>
+        <h4>3. Uso responsable</h4>
+        <p>Queda prohibido el mal uso de las instalaciones, la reventa de beneficios y el préstamo del QR de acceso.</p>
+        <h4>4. Política de cancelación</h4>
+        <p>Las cancelaciones se procesan en hasta 5 días hábiles. Los reintegros se realizan al medio de pago original.</p>
+        <h4>5. Sistema Vida Puntos</h4>
+        <p>Los puntos no son canjeables por dinero ni transferibles. Vencen al cabo de 12 meses sin uso.</p>
+      </div>
+
+      <div class="terms-checkbox">
+        <input type="checkbox" id="terms-accept">
+        <label for="terms-accept">He leído y acepto los términos y condiciones</label>
+      </div>
+
+      <button class="btn-primary" onclick="doSignTerms()">Firmar y continuar</button>
+      <button class="btn-secondary" onclick="goto('access-denied')">No acepto</button>
+    </div>
+  </div>
+
+  <!-- PLAN -->
+  <div class="screen" id="screen-plan">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail">
+      <span>Suscripción</span><span class="sep">›</span><span class="current">Elegir plan</span><span class="sep">›</span><span>Pago</span>
+    </div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="_registering ? goto('terms') : goto('perfil')">←</button>
+      <div class="top-nav-title">Elegir plan</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Elegir plan de suscripción</div>
+      <div class="step-sub">Seleccioná el plan que mejor se adapte</div>
+
+      <div class="plan-card" onclick="selectPlan(this, 'Básico', '$8.999')">
+        <div class="plan-name">Básico</div>
+        <div class="plan-price">$8.999 <span>/mes</span></div>
+        <ul class="plan-features">
+          <li>Acceso a 1 sede</li>
+          <li>Clases virtuales ilimitadas</li>
+          <li>Plan de rutinas básico</li>
+        </ul>
+      </div>
+
+      <div class="plan-card featured" onclick="selectPlan(this, 'Premium', '$14.999')">
+        <div class="plan-badge-featured">⭐ Más popular</div>
+        <div class="plan-name">Premium</div>
+        <div class="plan-price">$14.999 <span>/mes</span></div>
+        <ul class="plan-features">
+          <li>Acceso a todas las sedes</li>
+          <li>Plan nutricional personalizado</li>
+          <li>Sistema Vida Puntos</li>
+          <li>Reserva de máquinas</li>
+        </ul>
+      </div>
+
+      <div class="plan-card" onclick="selectPlan(this, 'Elite', '$24.999')">
+        <div class="plan-name">Elite</div>
+        <div class="plan-price">$24.999 <span>/mes</span></div>
+        <ul class="plan-features">
+          <li>Todo lo del plan Premium</li>
+          <li>Entrenador personal virtual</li>
+          <li>Doble de puntos Vida</li>
+        </ul>
+      </div>
+
+      <button class="btn-primary" id="btn-continue-plan" onclick="goto('pagar-check')" style="margin-top:20px; opacity:0.5; pointer-events:none;">Continuar →</button>
+    </div>
+  </div>
+
+  <!-- PAGAR -->
+  <div class="screen" id="screen-pagar-check">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail">
+      <span>Plan</span><span class="sep">›</span><span class="current">¿Pagar?</span>
+    </div>
+    <div class="decision-screen">
+      <div class="decision-diamond">
+        <div class="decision-diamond-inner">
+          <div class="q-icon">💳</div>
+          <div class="q-text">¿Pagar?</div>
+        </div>
+      </div>
+      <div class="decision-context">
+        Confirmá que querés proceder al pago del plan <span class="text-green" id="pagar-plan-label">Premium</span>
+      </div>
+      <div class="decision-actions">
+        <button class="btn-danger" onclick="_registering ? goto('access-denied') : goto('home')" style="margin-top:0;">No</button>
+        <button class="btn-primary" onclick="goto('payment-method')">Sí, pagar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PAYMENT METHOD -->
+  <div class="screen" id="screen-payment-method">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail">
+      <span>¿Pagar?</span><span class="sep">›</span><span class="current">Método de pago</span><span class="sep">›</span><span>Procesar</span>
+    </div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('pagar-check')">←</button>
+      <div class="top-nav-title">Método de pago</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Elegir método de pago</div>
+      <div class="step-sub">Plan seleccionado: <span class="text-green" id="payment-plan-label">Premium — $14.999/mes</span></div>
+
+      <div class="payment-card" onclick="elegirMetodo('Tarjeta de crédito')">
+        <div class="payment-icon">💳</div>
+        <div class="payment-info">
+          <div class="payment-name">Tarjeta de crédito</div>
+          <div class="payment-desc">Visa, Mastercard, Amex</div>
+        </div>
+        <span style="color:var(--green);">→</span>
+      </div>
+
+      <div class="payment-card" onclick="elegirMetodo('Tarjeta de débito')">
+        <div class="payment-icon">💳</div>
+        <div class="payment-info">
+          <div class="payment-name">Tarjeta de débito</div>
+          <div class="payment-desc">Débito en cuenta directo</div>
+        </div>
+        <span style="color:var(--green);">→</span>
+      </div>
+
+      <div class="payment-card" onclick="procesarPago('Transferencia bancaria')">
+        <div class="payment-icon">🏦</div>
+        <div class="payment-info">
+          <div class="payment-name">Transferencia bancaria</div>
+          <div class="payment-desc">CBU / CVU / Alias</div>
+        </div>
+        <span style="color:var(--green);">→</span>
+      </div>
+
+      <div class="payment-card" onclick="procesarPago('MercadoPago')">
+        <div class="payment-icon">📱</div>
+        <div class="payment-info">
+          <div class="payment-name">MercadoPago</div>
+          <div class="payment-desc">Cuenta MP o QR (simula fallo)</div>
+        </div>
+        <span style="color:var(--green);">→</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- TARJETA FORM -->
+  <div class="screen" id="screen-card-form">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Método</span><span class="sep">›</span><span class="current">Datos de tarjeta</span><span class="sep">›</span><span>Procesar</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('payment-method')">←</button>
+      <div class="top-nav-title">Datos de tarjeta</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Ingresá los datos</div>
+      <div class="step-sub" id="card-form-method">Tarjeta de crédito</div>
+
+      <div class="card-preview">
+        <div class="card-brand">VISA</div>
+        <div class="card-chip"></div>
+        <div class="card-number-display" id="prev-number">•••• •••• •••• ••••</div>
+        <div class="card-footer">
+          <div>
+            <div class="card-footer-label">Titular</div>
+            <div class="card-footer-value" id="prev-name">NOMBRE APELLIDO</div>
+          </div>
+          <div>
+            <div class="card-footer-label">Vence</div>
+            <div class="card-footer-value" id="prev-exp">MM/AA</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Número de tarjeta</label>
+        <input class="form-input" type="text" inputmode="numeric" maxlength="19" placeholder="1234 5678 9012 3456" id="card-number" oninput="formatCardNumber(this)">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Nombre del titular</label>
+        <input class="form-input" type="text" placeholder="Como figura en la tarjeta" id="card-name" oninput="updatePreview()">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Vencimiento</label>
+          <input class="form-input" type="text" inputmode="numeric" maxlength="5" placeholder="MM/AA" id="card-exp" oninput="formatExp(this)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">CVV</label>
+          <input class="form-input" type="text" inputmode="numeric" maxlength="4" placeholder="123" id="card-cvv">
+        </div>
+      </div>
+
+      <button class="btn-primary" onclick="submitCard()">Pagar ahora</button>
+    </div>
+  </div>
+
+  <!-- PERFIL / MI SUSCRIPCION -->
+  <div class="screen" id="screen-perfil">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span class="current">Mi suscripción y cuenta</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('home')">←</button>
+      <div class="top-nav-title">Mi Suscripción</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="perfil-hero">
+        <div class="perfil-avatar">👤</div>
+        <div class="perfil-name" id="perfil-name">Santiago Estevez</div>
+        <div class="perfil-mail" id="perfil-mail">santiago@fitlife.com</div>
+        <div class="perfil-badge" id="perfil-plan-badge">⭐ Plan Premium</div>
+      </div>
+
+      <div style="font-family:'Space Grotesk',sans-serif; font-size:14px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin: 12px 0;">Suscripción</div>
+
+      <div class="config-row" onclick="goto('plan')">
+        <div class="config-row-icon">🔄</div>
+        <div class="config-row-text">
+          <div class="config-row-title">Cambiar plan</div>
+          <div class="config-row-sub">Básico, Premium o Elite</div>
+        </div>
+        <span style="color:var(--green);">→</span>
+      </div>
+
+      <div class="config-row" onclick="goto('payment-method')">
+        <div class="config-row-icon">💳</div>
+        <div class="config-row-text">
+          <div class="config-row-title">Método de pago</div>
+          <div class="config-row-sub">Cambiar o actualizar</div>
+        </div>
+        <span style="color:var(--green);">→</span>
+      </div>
+
+      <div class="config-row" onclick="showAlert('Próxima en 12 días', 'success')">
+        <div class="config-row-icon">📅</div>
+        <div class="config-row-text">
+          <div class="config-row-title">Próximo cobro</div>
+          <div class="config-row-sub">15 de Junio · $14.999</div>
+        </div>
+        <span style="color:var(--green);">→</span>
+      </div>
+
+      <div class="config-row" onclick="showAlert('Historial cargado', 'success')">
+        <div class="config-row-icon">📋</div>
+        <div class="config-row-text">
+          <div class="config-row-title">Historial de pagos</div>
+          <div class="config-row-sub">Ver facturas anteriores</div>
+        </div>
+        <span style="color:var(--green);">→</span>
+      </div>
+
+      <div style="font-family:'Space Grotesk',sans-serif; font-size:14px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin: 20px 0 12px;">Cuenta</div>
+
+      <div class="config-row" onclick="showAlert('Datos personales', 'success')">
+        <div class="config-row-icon">👤</div>
+        <div class="config-row-text">
+          <div class="config-row-title">Datos personales</div>
+          <div class="config-row-sub">Nombre, email, teléfono</div>
+        </div>
+        <span style="color:var(--green);">→</span>
+      </div>
+
+      <div class="config-row" onclick="showAlert('Cambio de contraseña', 'success')">
+        <div class="config-row-icon">🔒</div>
+        <div class="config-row-text">
+          <div class="config-row-title">Cambiar contraseña</div>
+          <div class="config-row-sub">Seguridad de la cuenta</div>
+        </div>
+        <span style="color:var(--green);">→</span>
+      </div>
+
+      <div class="config-row" onclick="showAlert('Notificaciones', 'success')">
+        <div class="config-row-icon">🔔</div>
+        <div class="config-row-text">
+          <div class="config-row-title">Notificaciones</div>
+          <div class="config-row-sub">Push, email, recordatorios</div>
+        </div>
+        <span style="color:var(--green);">→</span>
+      </div>
+
+      <button class="btn-danger" onclick="if(confirm('¿Cancelar suscripción?')) goto('access-denied')">Cancelar suscripción</button>
+      <button class="btn-secondary" onclick="goto('auth-choice')">Cerrar sesión</button>
+    </div>
+  </div>
+
+  <!-- PROCESSING -->
+  <div class="screen" id="screen-processing">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Método de pago</span><span class="sep">›</span><span class="current">Procesando</span></div>
+    <div class="processing-screen">
+      <div class="spinner"></div>
+      <div class="step-title">Procesar pago</div>
+      <div class="step-sub" style="margin-bottom:0;">Con <span class="text-green" id="processing-method-label">Tarjeta de crédito</span></div>
+    </div>
+  </div>
+
+  <!-- PAGO EXITOSO -->
+  <div class="screen" id="screen-pago-exitoso-check">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Procesar pago</span><span class="sep">›</span><span class="current">¿Exitoso?</span></div>
+    <div class="decision-screen">
+      <div class="decision-diamond">
+        <div class="decision-diamond-inner">
+          <div class="q-icon">✓</div>
+          <div class="q-text">¿Pago<br>exitoso?</div>
+        </div>
+      </div>
+      <div class="decision-context">Procesando respuesta del banco...</div>
+      <div class="spinner" style="margin: 0 auto;"></div>
+    </div>
+  </div>
+
+  <!-- REINTENTAR -->
+  <div class="screen" id="screen-reintentar-check">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Pago fallido</span><span class="sep">›</span><span class="current">¿Reintentar?</span></div>
+    <div class="decision-screen">
+      <div class="decision-diamond" style="border-color:var(--red);">
+        <div class="decision-diamond-inner">
+          <div class="q-icon">⚠️</div>
+          <div class="q-text">¿Reintentar?</div>
+        </div>
+      </div>
+      <div class="decision-context">El pago no pudo procesarse. ¿Querés intentar de nuevo?</div>
+      <div class="decision-actions">
+        <button class="btn-danger" onclick="goto('home')" style="margin-top:0;">No</button>
+        <button class="btn-primary" onclick="goto('payment-method')">Sí, reintentar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ACCESS GRANTED -->
+  <div class="screen" id="screen-access-granted">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="granted-screen">
+      <div class="granted-icon">✓</div>
+      <div class="granted-title">¡Bienvenido!</div>
+      <div class="granted-sub">Tu cuenta está lista. Te redirigimos a la pantalla de inicio.</div>
+      <div class="spinner" style="margin: 16px auto; width:40px; height:40px; border-width:3px;"></div>
+    </div>
+  </div>
+
+  <!-- ACCESS DENIED -->
+  <div class="screen" id="screen-access-denied">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="denied-screen">
+      <div class="denied-icon">✕</div>
+      <div class="denied-title">Acceso denegado</div>
+      <div class="denied-sub">No podés acceder al contenido de la app sin una suscripción activa.</div>
+      <div style="width:100%; margin-top:16px;">
+        <button class="btn-primary" onclick="goto('auth-choice')">Volver al inicio</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- HOME -->
+  <div class="screen" id="screen-home">
+    <div class="status-bar" style="padding:14px 28px 0; flex-shrink:0;"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="home-header">
+      <div class="home-greeting">Buenos días 👋</div>
+      <div class="home-name" id="home-username">Santiago <span>Estevez</span></div>
+      <div class="home-card">
+        <div>
+          <div class="home-card-label">Vida Puntos</div>
+          <div class="home-card-value" id="home-points">2.450</div>
+          <div class="home-card-sub" id="home-plan-label">Plan Premium activo</div>
+        </div>
+        <div class="home-card-icon">⚡</div>
+      </div>
+    </div>
+
+    <!-- BANNER UPGRADE -->
+    <div class="upgrade-banner" onclick="goto('plan')" id="upgrade-banner-home">
+      <div class="upgrade-icon">⭐</div>
+      <div class="upgrade-text">
+        <div class="upgrade-title">Suscribite o mejorá tu plan</div>
+        <div class="upgrade-sub">Desbloqueá todos los beneficios</div>
+      </div>
+      <div class="upgrade-arrow">→</div>
+    </div>
+
+    <div class="menu-grid">
+      <div class="menu-card" onclick="goto('nutrition')">
+        <div class="menu-card-icon">🥗</div>
+        <div class="menu-card-title">Plan de Nutrición</div>
+        <div class="menu-card-sub">Recomendaciones</div>
+        <div class="menu-card-arrow">→</div>
+      </div>
+      <div class="menu-card" onclick="goto('routines')">
+        <div class="menu-card-icon">💪</div>
+        <div class="menu-card-title">Rutinas</div>
+        <div class="menu-card-sub">Personalizadas</div>
+        <div class="menu-card-arrow">→</div>
+      </div>
+      <div class="menu-card" onclick="goto('qr-bio')">
+        <div class="menu-card-icon">📱</div>
+        <div class="menu-card-title">QR de acceso</div>
+        <div class="menu-card-sub">Escaneo facial</div>
+        <div class="menu-card-arrow">→</div>
+      </div>
+      <div class="menu-card" onclick="goto('perfil')">
+        <div class="menu-card-icon">⚙️</div>
+        <div class="menu-card-title">Mi Suscripción</div>
+        <div class="menu-card-sub">Configurar cuenta</div>
+        <div class="menu-card-arrow">→</div>
+      </div>
+    </div>
+
+    <div class="yt-section-label">🎬 Entrenamientos destacados</div>
+    <div style="padding: 0 24px 16px;">
+      <a class="yt-link" href="https://www.youtube.com/watch?v=UBMk30rjy0o" target="_blank">
+        <div class="yt-link-icon">▶</div>
+        <div class="yt-link-text">
+          <div class="yt-link-title">Full Body Workout — 30 min</div>
+          <div class="yt-link-meta">🔥 Intermedio · 2.4M vistas</div>
+        </div>
+        <span style="color:var(--text-muted); font-size:14px;">↗</span>
+      </a>
+      <a class="yt-link" href="https://www.youtube.com/watch?v=ml6cT4AZdqI" target="_blank">
+        <div class="yt-link-icon">▶</div>
+        <div class="yt-link-text">
+          <div class="yt-link-title">HIIT Cardio — 20 min sin equipo</div>
+          <div class="yt-link-meta">⚡ Avanzado · 1.1M vistas</div>
+        </div>
+        <span style="color:var(--text-muted); font-size:14px;">↗</span>
+      </a>
+      <a class="yt-link" href="https://www.youtube.com/watch?v=v7AYKMP6rOE" target="_blank">
+        <div class="yt-link-icon">▶</div>
+        <div class="yt-link-text">
+          <div class="yt-link-title">Yoga principiantes — 15 min</div>
+          <div class="yt-link-meta">🧘 Principiante · 890K vistas</div>
+        </div>
+        <span style="color:var(--text-muted); font-size:14px;">↗</span>
+      </a>
+    </div>
+
+    <div class="bottom-nav">
+      <div class="nav-item active" onclick="goto('home')"><span class="nav-icon">🏠</span><span class="nav-label">Inicio</span></div>
+      <div class="nav-item" onclick="goto('classes')"><span class="nav-icon">🎥</span><span class="nav-label">Clases</span></div>
+      <div class="nav-item" onclick="goto('qr-bio')"><span class="nav-icon">📱</span><span class="nav-label">QR</span></div>
+      <div class="nav-item" onclick="goto('sedes')"><span class="nav-icon">📍</span><span class="nav-label">Sedes</span></div>
+      <div class="nav-item" onclick="goto('puntos-vida-check')"><span class="nav-icon">⚡</span><span class="nav-label">Puntos</span></div>
+    </div>
+  </div>
+
+  <!-- NUTRICION -->
+  <div class="screen" id="screen-nutrition">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span class="current">Ver recomendaciones nutricionales</span><span class="sep">›</span><span>Elegir objetivo</span><span class="sep">›</span><span>Dieta detallada</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('home')">←</button>
+      <div class="top-nav-title">Plan de Nutrición</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Ver recomendaciones nutricionales</div>
+      <div class="step-sub">Elegí en base a tus objetivos</div>
+
+      <div class="objective-grid">
+        <div class="objective-card" onclick="selectNutObj(this, 'deficit', '🔥 Perder peso')">
+          <div class="obj-icon">🔥</div>
+          <div class="obj-label">Perder peso</div>
+        </div>
+        <div class="objective-card" onclick="selectNutObj(this, 'mantenimiento', '⚖️ Mantenerme')">
+          <div class="obj-icon">⚖️</div>
+          <div class="obj-label">Mantenerme</div>
+        </div>
+        <div class="objective-card" onclick="selectNutObj(this, 'volumen', '💪 Ganar músculo')">
+          <div class="obj-icon">💪</div>
+          <div class="obj-label">Ganar músculo</div>
+        </div>
+        <div class="objective-card" onclick="selectNutObj(this, 'rendimiento', '⚡ Rendimiento')">
+          <div class="obj-icon">⚡</div>
+          <div class="obj-label">Rendimiento</div>
+        </div>
+      </div>
+
+      <div style="font-family:'Space Grotesk',sans-serif; font-size:16px; font-weight:700; color:var(--text); margin: 8px 0 12px;">Dietas recomendadas</div>
+
+      <div class="diet-card" onclick="goto('nutrition-detail', 'Mediterránea')">
+        <div class="diet-card-header">
+          <div class="diet-name">🫒 Mediterránea</div>
+          <div class="diet-cal">1.800 kcal</div>
+        </div>
+        <div class="diet-desc">Vegetales, aceite de oliva, proteínas magras y cereales integrales.</div>
+        <div class="diet-macros">
+          <div class="macro"><div class="macro-val">45%</div><div class="macro-label">Carbos</div></div>
+          <div class="macro"><div class="macro-val">30%</div><div class="macro-label">Proteína</div></div>
+          <div class="macro"><div class="macro-val">25%</div><div class="macro-label">Grasas</div></div>
+        </div>
+      </div>
+
+      <div class="diet-card" onclick="goto('nutrition-detail', 'Alta en proteínas')">
+        <div class="diet-card-header">
+          <div class="diet-name">🥩 Alta en proteínas</div>
+          <div class="diet-cal">2.200 kcal</div>
+        </div>
+        <div class="diet-desc">Maximiza la síntesis muscular con alta ingesta proteica.</div>
+        <div class="diet-macros">
+          <div class="macro"><div class="macro-val">35%</div><div class="macro-label">Carbos</div></div>
+          <div class="macro"><div class="macro-val">45%</div><div class="macro-label">Proteína</div></div>
+          <div class="macro"><div class="macro-val">20%</div><div class="macro-label">Grasas</div></div>
+        </div>
+      </div>
+
+      <div class="diet-card" onclick="goto('nutrition-detail', 'Plant-based')">
+        <div class="diet-card-header">
+          <div class="diet-name">🌱 Plant-based</div>
+          <div class="diet-cal">1.600 kcal</div>
+        </div>
+        <div class="diet-desc">100% de origen vegetal. Legumbres, tofu y proteínas vegetales.</div>
+        <div class="diet-macros">
+          <div class="macro"><div class="macro-val">55%</div><div class="macro-label">Carbos</div></div>
+          <div class="macro"><div class="macro-val">25%</div><div class="macro-label">Proteína</div></div>
+          <div class="macro"><div class="macro-val">20%</div><div class="macro-label">Grasas</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- NUTRICION DETAIL -->
+  <div class="screen" id="screen-nutrition-detail">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Recomendaciones</span><span class="sep">›</span><span>Objetivo</span><span class="sep">›</span><span class="current">Dieta detallada</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('nutrition')">←</button>
+      <div class="top-nav-title" id="diet-detail-title">Mediterránea</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Consultar dieta detallada</div>
+      <div class="step-sub">Con alimentación sugerida para el día</div>
+
+      <div style="background:var(--green); border-radius:var(--radius); padding:18px; margin-bottom:20px; box-shadow:var(--shadow-md);">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:12px; color:var(--yellow); margin-bottom:4px;">Calorías diarias</div>
+            <div style="font-family:'Space Grotesk',sans-serif; font-size:24px; font-weight:700; color:white;" id="diet-detail-cal">1.800 kcal</div>
+          </div>
+          <div style="font-size:36px;" id="diet-detail-emoji">🫒</div>
+        </div>
+      </div>
+
+      <div style="font-family:'Space Grotesk',sans-serif; font-size:16px; font-weight:700; color:var(--text); margin-bottom:12px;">Alimentación sugerida</div>
+
+      <div class="meal-row">
+        <div class="meal-time">🌅 Desayuno (07:30)</div>
+        <div class="meal-desc">Avena con frutas y proteína en polvo · Tostada con palta y huevo</div>
+      </div>
+      <div class="meal-row">
+        <div class="meal-time">🍎 Media mañana (10:30)</div>
+        <div class="meal-desc">Yogur griego con almendras y miel</div>
+      </div>
+      <div class="meal-row">
+        <div class="meal-time">☀️ Almuerzo (13:00)</div>
+        <div class="meal-desc">Pollo grillado con quinoa y vegetales asados · Ensalada verde</div>
+      </div>
+      <div class="meal-row">
+        <div class="meal-time">🥤 Merienda (17:00)</div>
+        <div class="meal-desc">Batido proteico con banana y mantequilla de maní</div>
+      </div>
+      <div class="meal-row">
+        <div class="meal-time">🌙 Cena (20:30)</div>
+        <div class="meal-desc">Salmón con batata al horno y espinaca salteada</div>
+      </div>
+
+      <div style="margin-top:24px;">
+        <button class="btn-primary" onclick="goto('home'); showAlert('Plan guardado', 'success')">Guardar este plan</button>
+        <button class="btn-secondary" onclick="goto('nutrition')">Volver a recomendaciones</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PUNTOS VIDA CHECK -->
+  <div class="screen" id="screen-puntos-vida-check">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span class="current">¿Ver saldo o beneficios?</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('home')">←</button>
+      <div class="top-nav-title">Puntos Vida</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content" style="display:flex; flex-direction:column; justify-content:center;">
+      <div class="step-title" style="text-align:center;">¿Qué querés hacer?</div>
+      <div class="step-sub" style="text-align:center;">Elegí entre consultar tu saldo o canjear beneficios</div>
+
+      <div class="choice-card" onclick="goto('puntos-saldo')">
+        <div class="choice-card-icon">💰</div>
+        <div class="choice-card-info">
+          <div class="choice-card-title">Saldo</div>
+          <div class="choice-card-sub">Consultar puntos y vía de obtención</div>
+        </div>
+        <div class="choice-card-arrow">→</div>
+      </div>
+
+      <div class="choice-card" onclick="goto('puntos-beneficios')">
+        <div class="choice-card-icon">🎁</div>
+        <div class="choice-card-info">
+          <div class="choice-card-title">Beneficios</div>
+          <div class="choice-card-sub">Canjear puntos por premios</div>
+        </div>
+        <div class="choice-card-arrow">→</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PUNTOS SALDO -->
+  <div class="screen" id="screen-puntos-saldo">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Puntos Vida</span><span class="sep">›</span><span class="current">Consultar saldo + vía de obtención</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('puntos-vida-check')">←</button>
+      <div class="top-nav-title">Saldo</div>
+      <div style="width:36px;"></div>
+    </div>
+
+    <div class="points-hero">
+      <div class="points-label">Saldo de puntos</div>
+      <div class="points-value" id="display-points-saldo">2.450</div>
+      <div class="points-sub">Equivalen a $2.450 en beneficios</div>
+    </div>
+
+    <div class="screen-content" style="padding-top:0;">
+      <div style="font-family:'Space Grotesk',sans-serif; font-size:16px; font-weight:700; color:var(--text); margin-bottom:12px;">Vía de obtención (objetivos)</div>
+
+      <div class="obtencion-list">
+        <div class="obtencion-item">
+          <div>
+            <div class="obtencion-label">✅ Ir al gimnasio</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Por cada visita registrada</div>
+          </div>
+          <div class="obtencion-value">+10 pts</div>
+        </div>
+        <div class="obtencion-item">
+          <div>
+            <div class="obtencion-label">🎥 Completar clase virtual</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Por clase finalizada</div>
+          </div>
+          <div class="obtencion-value">+20 pts</div>
+        </div>
+        <div class="obtencion-item">
+          <div>
+            <div class="obtencion-label">💪 Completar rutina</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Por rutina finalizada</div>
+          </div>
+          <div class="obtencion-value">+15 pts</div>
+        </div>
+        <div class="obtencion-item">
+          <div>
+            <div class="obtencion-label">🎯 Cumplir objetivo semanal</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Por semana completa</div>
+          </div>
+          <div class="obtencion-value">+50 pts</div>
+        </div>
+        <div class="obtencion-item">
+          <div>
+            <div class="obtencion-label">👥 Referir un amigo</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Cuando se suscribe</div>
+          </div>
+          <div class="obtencion-value">+100 pts</div>
+        </div>
+      </div>
+
+      <button class="btn-secondary" onclick="goto('puntos-beneficios')">Ver beneficios disponibles →</button>
+    </div>
+  </div>
+
+  <!-- PUNTOS BENEFICIOS -->
+  <div class="screen" id="screen-puntos-beneficios">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="points-saldo-corner" id="display-points-corner">2.450 pts</div>
+    <div class="step-trail"><span>Puntos Vida</span><span class="sep">›</span><span class="current">Lista de beneficios</span><span class="sep">›</span><span>Seleccionar</span><span class="sep">›</span><span>¿Confirmar canje?</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('puntos-vida-check')">←</button>
+      <div class="top-nav-title">Beneficios</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Ver lista de beneficios</div>
+      <div class="step-sub">Seleccioná un beneficio para canjear</div>
+
+      <div class="benefit-card" onclick="selectBeneficio('🧴 Proteína en polvo (1kg)', 1500)">
+        <div class="benefit-icon-wrap">🧴</div>
+        <div class="benefit-info">
+          <div class="benefit-name">Proteína en polvo (1kg)</div>
+          <div class="benefit-desc">Whey protein vainilla o chocolate</div>
+        </div>
+        <div class="benefit-cost">1.500 pts</div>
+      </div>
+
+      <div class="benefit-card" onclick="selectBeneficio('👕 Remera FitLife', 800)">
+        <div class="benefit-icon-wrap">👕</div>
+        <div class="benefit-info">
+          <div class="benefit-name">Remera FitLife</div>
+          <div class="benefit-desc">Talle a elección</div>
+        </div>
+        <div class="benefit-cost">800 pts</div>
+      </div>
+
+      <div class="benefit-card" onclick="selectBeneficio('🥤 Botella de agua', 400)">
+        <div class="benefit-icon-wrap">🥤</div>
+        <div class="benefit-info">
+          <div class="benefit-name">Botella de agua</div>
+          <div class="benefit-desc">Acero inoxidable 750ml</div>
+        </div>
+        <div class="benefit-cost">400 pts</div>
+      </div>
+
+      <div class="benefit-card" onclick="selectBeneficio('🎟️ 1 mes gratis', 5000)">
+        <div class="benefit-icon-wrap">🎟️</div>
+        <div class="benefit-info">
+          <div class="benefit-name">1 mes gratis</div>
+          <div class="benefit-desc">Extensión de suscripción</div>
+        </div>
+        <div class="benefit-cost">5.000 pts</div>
+      </div>
+
+      <div class="benefit-card" onclick="selectBeneficio('👟 Zapatillas recicladas', 4500)">
+        <div class="benefit-icon-wrap">👟</div>
+        <div class="benefit-info">
+          <div class="benefit-name">Zapatillas recicladas</div>
+          <div class="benefit-desc">Plástico oceánico reciclado</div>
+        </div>
+        <div class="benefit-cost">4.500 pts</div>
+      </div>
+
+      <div class="benefit-card" onclick="selectBeneficio('🎒 Mochila eco', 2200)">
+        <div class="benefit-icon-wrap">🎒</div>
+        <div class="benefit-info">
+          <div class="benefit-name">Mochila eco</div>
+          <div class="benefit-desc">Tela reciclada — diseño FitLife</div>
+        </div>
+        <div class="benefit-cost">2.200 pts</div>
+      </div>
+
+      <div class="benefit-card" onclick="selectBeneficio('👕 Remera algodón orgánico', 1000)">
+        <div class="benefit-icon-wrap">👕</div>
+        <div class="benefit-info">
+          <div class="benefit-name">Remera algodón orgánico</div>
+          <div class="benefit-desc">Cultivo sin químicos · talle a elección</div>
+        </div>
+        <div class="benefit-cost">1.000 pts</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CANJE CHECK -->
+  <div class="screen" id="screen-canje-check">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Beneficios</span><span class="sep">›</span><span>Seleccionado</span><span class="sep">›</span><span class="current">¿Confirmar canje?</span></div>
+    <div class="decision-screen">
+      <div class="decision-diamond">
+        <div class="decision-diamond-inner">
+          <div class="q-icon">🎁</div>
+          <div class="q-text">¿Confirmar<br>canje?</div>
+        </div>
+      </div>
+
+      <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:10px; padding:16px; width:100%; box-shadow:var(--shadow-sm);">
+        <div style="font-size:14px; color:var(--text); font-weight:700; margin-bottom:12px; text-align:center;" id="canje-item-name">Proteína en polvo (1kg)</div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+          <span style="color:var(--text-muted); font-size:13px;">Tus puntos</span>
+          <span style="color:var(--green); font-weight:700;" id="canje-saldo">2.450 pts</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+          <span style="color:var(--text-muted); font-size:13px;">Costo</span>
+          <span style="color:var(--text); font-weight:700;" id="canje-cost">- 1.500 pts</span>
+        </div>
+        <div style="height:1px; background:var(--border); margin:10px 0;"></div>
+        <div style="display:flex; justify-content:space-between;">
+          <span style="color:var(--text-muted); font-size:13px;">Quedarán</span>
+          <span style="color:var(--green); font-weight:700;" id="canje-restante">950 pts</span>
+        </div>
+      </div>
+
+      <div class="decision-actions">
+        <button class="btn-danger" onclick="cancelarCanje()" style="margin-top:0;">No, cancelar</button>
+        <button class="btn-primary" onclick="confirmarCanje()">Sí, confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CANJE EXITOSO -->
+  <div class="screen" id="screen-canje-exitoso">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="granted-screen">
+      <div class="granted-icon">🎉</div>
+      <div class="granted-title">¡Canje exitoso!</div>
+      <div class="granted-sub">Descontamos los puntos y recibirás tu beneficio en breve.</div>
+      <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-sm); padding:14px; margin-top:16px; width:100%; box-shadow:var(--shadow-sm);">
+        <div style="font-size:13px; color:var(--text);" id="exito-canje-item">Proteína en polvo (1kg)</div>
+        <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Código: <span class="text-green" id="exito-canje-code">FL-2026-A4B7</span></div>
+      </div>
+      <button class="btn-primary" onclick="goto('home')" style="margin-top:16px;">Volver al inicio</button>
+      <button class="btn-secondary" onclick="goto('puntos-beneficios')">Ver más beneficios</button>
+    </div>
+  </div>
+
+  <!-- CLASSES -->
+  <div class="screen" id="screen-classes">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span class="current">Ver catálogo</span><span class="sep">›</span><span>Filtrar</span><span class="sep">›</span><span>Seleccionar</span><span class="sep">›</span><span>¿Inscribirse?</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('home')">←</button>
+      <div class="top-nav-title">Clases</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Ver catálogo de clases</div>
+      <div class="step-sub">Virtuales o presenciales — Filtrá por categoría/nivel (opcional)</div>
+
+      <div style="display:flex; gap:8px; margin-bottom:12px;">
+        <button class="filter-chip active" onclick="filterTipo(this, 'todas')">Todas</button>
+        <button class="filter-chip" onclick="filterTipo(this, 'virtual')">🎥 Virtuales</button>
+        <button class="filter-chip" onclick="filterTipo(this, 'presencial')">📍 Presenciales</button>
+      </div>
+
+      <div class="filter-row">
+        <button class="filter-chip active" onclick="filterCat(this)">Todas</button>
+        <button class="filter-chip" onclick="filterCat(this)">Fuerza</button>
+        <button class="filter-chip" onclick="filterCat(this)">Cardio</button>
+        <button class="filter-chip" onclick="filterCat(this)">Yoga</button>
+        <button class="filter-chip" onclick="filterCat(this)">HIIT</button>
+        <button class="filter-chip" onclick="filterCat(this)">Principiante</button>
+        <button class="filter-chip" onclick="filterCat(this)">Avanzado</button>
+      </div>
+
+      <div class="class-card" onclick="goto('class-detail', 'Full Body HIIT|HIIT|Virtual|45 min|Intermedio|🔥')">
+        <div class="class-thumb" style="background: linear-gradient(135deg, #1A3A2A, #2D5A3D);">🔥
+          <div class="class-tipo-badge">🎥 Virtual</div>
+          <div class="class-badge">HIIT</div>
+        </div>
+        <div class="class-body">
+          <div class="class-name">Full Body HIIT</div>
+          <div class="class-meta">
+            <div class="class-meta-item">⏱ 45 min</div>
+            <div class="class-meta-item">📊 Intermedio</div>
+            <div class="class-meta-item">👤 12 insc.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="class-card" onclick="goto('class-detail', 'Yoga Restore|Yoga|Presencial|60 min|Principiante|🧘')">
+        <div class="class-thumb" style="background: linear-gradient(135deg, #2D5A3D, #4CAF6F);">🧘
+          <div class="class-tipo-badge">📍 Presencial</div>
+          <div class="class-badge">Yoga</div>
+        </div>
+        <div class="class-body">
+          <div class="class-name">Yoga Restore</div>
+          <div class="class-meta">
+            <div class="class-meta-item">⏱ 60 min</div>
+            <div class="class-meta-item">📊 Principiante</div>
+            <div class="class-meta-item">👤 8 insc.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="class-card" onclick="goto('class-detail', 'Strength & Power|Fuerza|Presencial|50 min|Avanzado|💪')">
+        <div class="class-thumb" style="background: linear-gradient(135deg, #1A3A2A, #4CAF6F);">💪
+          <div class="class-tipo-badge">📍 Presencial</div>
+          <div class="class-badge">Fuerza</div>
+        </div>
+        <div class="class-body">
+          <div class="class-name">Strength & Power</div>
+          <div class="class-meta">
+            <div class="class-meta-item">⏱ 50 min</div>
+            <div class="class-meta-item">📊 Avanzado</div>
+            <div class="class-meta-item">👤 5 insc.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="class-card" onclick="goto('class-detail', 'Cardio Dance|Cardio|Virtual|40 min|Principiante|💃')">
+        <div class="class-thumb" style="background: linear-gradient(135deg, #2D5A3D, #1A3A2A);">💃
+          <div class="class-tipo-badge">🎥 Virtual</div>
+          <div class="class-badge">Cardio</div>
+        </div>
+        <div class="class-body">
+          <div class="class-name">Cardio Dance</div>
+          <div class="class-meta">
+            <div class="class-meta-item">⏱ 40 min</div>
+            <div class="class-meta-item">📊 Principiante</div>
+            <div class="class-meta-item">👤 20 insc.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CLASS DETAIL -->
+  <div class="screen" id="screen-class-detail">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Catálogo</span><span class="sep">›</span><span class="current">Clase seleccionada</span><span class="sep">›</span><span>¿Inscribirse?</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('classes')">←</button>
+      <div class="top-nav-title" id="cd-name">Full Body HIIT</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="class-detail-hero" id="cd-hero">🔥</div>
+
+      <div class="class-detail-meta">
+        <span class="yellow" id="cd-cat">HIIT</span>
+        <span id="cd-tipo">🎥 Virtual</span>
+        <span id="cd-dur">⏱ 45 min</span>
+        <span id="cd-nivel">📊 Intermedio</span>
+      </div>
+
+      <p style="color:var(--text-soft); font-size:14px; line-height:1.6; margin-bottom:24px;">
+        Clase de alta intensidad. Trabajo full body con intervalos cortos de máxima exigencia y descansos activos.
+      </p>
+
+      <button class="btn-primary" onclick="goto('inscribirse-check')">Continuar →</button>
+    </div>
+  </div>
+
+  <!-- INSCRIBIRSE -->
+  <div class="screen" id="screen-inscribirse-check">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Clase</span><span class="sep">›</span><span class="current">¿Inscribirse?</span></div>
+    <div class="decision-screen">
+      <div class="decision-diamond">
+        <div class="decision-diamond-inner">
+          <div class="q-icon">📝</div>
+          <div class="q-text">¿Desea<br>inscribirse?</div>
+        </div>
+      </div>
+      <div class="decision-context">¿Querés inscribirte a <span class="text-green" id="inscribirse-class-name">Full Body HIIT</span>?</div>
+      <div class="decision-actions">
+        <button class="btn-danger" onclick="goto('volver-salir-check')" style="margin-top:0;">No</button>
+        <button class="btn-primary" onclick="goto('horario')">Sí, inscribirme</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- HORARIO -->
+  <div class="screen" id="screen-horario">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Inscribirse</span><span class="sep">›</span><span class="current">Elegir día y horario</span><span class="sep">›</span><span>Confirmar</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('inscribirse-check')">←</button>
+      <div class="top-nav-title">Día y horario</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Elegir día y horario</div>
+      <div class="step-sub">Disponibles para los próximos 7 días</div>
+
+      <div class="horario-grid">
+        <div class="horario-chip" onclick="selectHorarioChip(this)">Lun 07:00</div>
+        <div class="horario-chip" onclick="selectHorarioChip(this)">Lun 19:00</div>
+        <div class="horario-chip unavailable">Mar 07:00</div>
+        <div class="horario-chip" onclick="selectHorarioChip(this)">Mar 19:00</div>
+        <div class="horario-chip" onclick="selectHorarioChip(this)">Mié 08:00</div>
+        <div class="horario-chip" onclick="selectHorarioChip(this)">Mié 19:00</div>
+        <div class="horario-chip" onclick="selectHorarioChip(this)">Jue 07:00</div>
+        <div class="horario-chip" onclick="selectHorarioChip(this)">Jue 19:00</div>
+        <div class="horario-chip unavailable">Vie 07:00</div>
+        <div class="horario-chip" onclick="selectHorarioChip(this)">Vie 19:00</div>
+        <div class="horario-chip" onclick="selectHorarioChip(this)">Sáb 10:00</div>
+        <div class="horario-chip" onclick="selectHorarioChip(this)">Sáb 11:00</div>
+      </div>
+
+      <button class="btn-primary" id="btn-ir-inscripcion" onclick="goto('proceso-inscripcion')" style="opacity:0.5; pointer-events:none;">Ir al proceso de inscripción →</button>
+    </div>
+  </div>
+
+  <!-- PROCESO INSCRIPCION -->
+  <div class="screen" id="screen-proceso-inscripcion">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Horario</span><span class="sep">›</span><span class="current">Confirmar reserva</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('horario')">←</button>
+      <div class="top-nav-title">Confirmar reserva</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Proceso de inscripción</div>
+      <div class="step-sub">Revisá los datos antes de confirmar</div>
+
+      <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:18px; margin-bottom:20px; box-shadow:var(--shadow-sm);">
+        <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Clase</div>
+        <div style="font-size:16px; font-weight:700; color:var(--text); margin-bottom:12px;" id="conf-class">Full Body HIIT</div>
+
+        <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Día y horario</div>
+        <div style="font-size:16px; font-weight:700; color:var(--green); margin-bottom:12px;" id="conf-horario">Lun 19:00</div>
+
+        <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Duración</div>
+        <div style="font-size:14px; color:var(--text);" id="conf-dur">45 min</div>
+      </div>
+
+      <button class="btn-primary" onclick="confirmarReserva()">Confirmar reserva ✓</button>
+      <button class="btn-secondary" onclick="goto('horario')">Cambiar horario</button>
+    </div>
+  </div>
+
+  <!-- RESERVA CONFIRMADA -->
+  <div class="screen" id="screen-reserva-confirmada">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="granted-screen">
+      <div class="granted-icon">✓</div>
+      <div class="granted-title">Reserva confirmada</div>
+      <div class="granted-sub">Te enviamos los detalles de la inscripción a tu mail.</div>
+      <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-sm); padding:14px; margin-top:16px; width:100%; box-shadow:var(--shadow-sm);">
+        <div style="font-size:13px; color:var(--text);" id="rc-class">Full Body HIIT</div>
+        <div style="font-size:12px; color:var(--green); margin-top:4px; font-weight:700;" id="rc-horario">Lun 19:00</div>
+      </div>
+      <button class="btn-primary" onclick="goto('home')" style="margin-top:16px;">Volver al inicio</button>
+    </div>
+  </div>
+
+  <!-- VOLVER SALIR -->
+  <div class="screen" id="screen-volver-salir-check">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>No te inscribiste</span><span class="sep">›</span><span class="current">¿Volver al catálogo o salir?</span></div>
+    <div class="decision-screen">
+      <div class="decision-diamond">
+        <div class="decision-diamond-inner">
+          <div class="q-icon">↩️</div>
+          <div class="q-text">¿Volver al<br>catálogo o<br>salir?</div>
+        </div>
+      </div>
+      <div class="decision-context">Decidiste no inscribirte. ¿Qué querés hacer?</div>
+      <div class="decision-actions">
+        <button class="btn-secondary" onclick="goto('home')" style="margin-top:0;">Salir</button>
+        <button class="btn-primary" onclick="goto('classes')">Volver al catálogo</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROUTINES -->
+  <div class="screen" id="screen-routines">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span class="current">Ver rutinas personalizadas</span><span class="sep">›</span><span>Elegir en base a objetivos</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('home')">←</button>
+      <div class="top-nav-title">Rutinas</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Ver rutinas personalizadas</div>
+      <div class="step-sub">Elegí en base a tus objetivos</div>
+
+      <div class="objective-grid">
+        <div class="objective-card" onclick="filterRoutine(this, 'perder')">
+          <div class="obj-icon">🔥</div>
+          <div class="obj-label">Perder peso</div>
+        </div>
+        <div class="objective-card selected" onclick="filterRoutine(this, 'musculo')">
+          <div class="obj-icon">💪</div>
+          <div class="obj-label">Ganar músculo</div>
+        </div>
+        <div class="objective-card" onclick="filterRoutine(this, 'rendimiento')">
+          <div class="obj-icon">⚡</div>
+          <div class="obj-label">Rendimiento</div>
+        </div>
+        <div class="objective-card" onclick="filterRoutine(this, 'flexibilidad')">
+          <div class="obj-icon">🧘</div>
+          <div class="obj-label">Flexibilidad</div>
+        </div>
+      </div>
+
+      <div class="routine-card" onclick="showAlert('Rutina iniciada 💪', 'success')">
+        <div class="routine-name">💪 Fuerza — Tren Superior</div>
+        <div class="routine-obj">Ganar músculo</div>
+        <div class="routine-exercises">Press de banca · Pull-ups · Remo · Curl de bíceps · 4 más</div>
+        <div style="margin-top:10px; font-size:12px; color:var(--text-muted);">8 ejercicios · 45 min · Intermedio</div>
+      </div>
+
+      <div class="routine-card" onclick="showAlert('Rutina iniciada 🔥', 'success')">
+        <div class="routine-name">🔥 HIIT — 20 min</div>
+        <div class="routine-obj">Perder peso</div>
+        <div class="routine-exercises">Burpees · Saltos · Mountain climbers · Sprint · 2 más</div>
+        <div style="margin-top:10px; font-size:12px; color:var(--text-muted);">6 ejercicios · 20 min · Avanzado</div>
+      </div>
+
+      <div class="routine-card" onclick="showAlert('Rutina iniciada 🧘', 'success')">
+        <div class="routine-name">🧘 Movilidad</div>
+        <div class="routine-obj">Flexibilidad</div>
+        <div class="routine-exercises">Estiramiento · Movilidad de cadera · Yoga flows · 4 más</div>
+        <div style="margin-top:10px; font-size:12px; color:var(--text-muted);">7 ejercicios · 30 min · Principiante</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- QR BIO -->
+  <div class="screen" id="screen-qr-bio">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Generar QR</span><span class="sep">›</span><span class="current">Escaneo facial</span><span class="sep">›</span><span>QR</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('home')">←</button>
+      <div class="top-nav-title">QR de acceso</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content" style="display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center;">
+      <div class="step-title">Verificación facial</div>
+      <div class="step-sub">Escaneo de rostro requerido para generar QR</div>
+
+      <div class="face-scan-frame" id="face-scan-frame">
+        <div class="corner c-tl"></div>
+        <div class="corner c-tr"></div>
+        <div class="corner c-bl"></div>
+        <div class="corner c-br"></div>
+        <div class="face-emoji" id="face-emoji">😊</div>
+      </div>
+
+      <div id="bio-state-init">
+        <p style="color:var(--text); font-size:15px; font-weight:600; margin-bottom:20px;">Posicioná tu rostro frente a la cámara</p>
+        <button class="btn-primary" onclick="startBio()" style="max-width:280px;">Escanear rostro</button>
+      </div>
+
+      <div id="bio-state-checking" style="display:none;">
+        <p style="color:var(--text-muted); font-size:14px;">Escaneando rostro...</p>
+        <div class="spinner" style="margin: 16px auto; width:40px; height:40px; border-width:3px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- QR BIO RESULT -->
+  <div class="screen" id="screen-qr-x-check">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Escaneo facial</span><span class="sep">›</span><span class="current">Resultado</span></div>
+    <div class="decision-screen">
+      <div class="decision-diamond">
+        <div class="decision-diamond-inner">
+          <div class="q-icon">🔍</div>
+          <div class="q-text">¿Rostro<br>reconocido?</div>
+        </div>
+      </div>
+      <div class="decision-context">Procesando reconocimiento facial...</div>
+      <div class="spinner" style="margin: 0 auto;"></div>
+    </div>
+  </div>
+
+  <!-- QR REINTENTAR -->
+  <div class="screen" id="screen-qr-reintentar">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Escaneo fallido</span><span class="sep">›</span><span class="current">¿Reintentar?</span></div>
+    <div class="decision-screen">
+      <div class="decision-diamond" style="border-color:var(--red);">
+        <div class="decision-diamond-inner">
+          <div class="q-icon">❌</div>
+          <div class="q-text">¿Reintentar?</div>
+        </div>
+      </div>
+      <div class="decision-context">El escaneo facial falló. ¿Querés intentar de nuevo?</div>
+      <div class="decision-actions">
+        <button class="btn-danger" onclick="goto('home')" style="margin-top:0;">No</button>
+        <button class="btn-primary" onclick="goto('qr-bio')">Sí, reintentar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- QR SHOW -->
+  <div class="screen" id="screen-qr-show">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Bio exitosa</span><span class="sep">›</span><span class="current">Mostrar QR</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('home')">←</button>
+      <div class="top-nav-title">QR de acceso</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content" style="text-align:center;">
+      <div class="step-title" style="text-align:center;">Mostrar QR</div>
+      <div class="step-sub" style="text-align:center;">Presentá este código en el lector de la sede</div>
+
+      <div class="qr-box"><div class="qr-inner"></div></div>
+
+      <div class="qr-timer">
+        <div class="qr-timer-dot"></div>
+        <span>Válido por <span id="qr-countdown">5:00</span></span>
+      </div>
+
+      <div class="qr-valid-badge">⏱ Válido por 5 minutos</div>
+
+      <p style="color:var(--text-muted); font-size:12px; margin-top:24px;">El código expira automáticamente por seguridad</p>
+    </div>
+  </div>
+
+  <!-- SEDES -->
+  <div class="screen" id="screen-sedes">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span class="current">Ver mapa</span><span class="sep">›</span><span>Seleccionar sede</span><span class="sep">›</span><span>Consultar detalles</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('home')">←</button>
+      <div class="top-nav-title">Sedes</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Ver mapa con sedes disponibles</div>
+      <div class="step-sub">Seleccioná una sede para consultar detalles</div>
+
+      <div class="map-placeholder">
+        <span style="font-size:40px;">🗺️</span>
+        <span style="color:var(--text-muted); font-size:13px;">Mapa interactivo de sedes</span>
+      </div>
+
+      <div class="sede-card" onclick="selectSede('Palermo', 'Honduras 4523', true)">
+        <div class="sede-card-top">
+          <div class="sede-name">FitLife Palermo</div>
+          <div class="sede-open open">Abierto</div>
+        </div>
+        <div class="sede-address">📍 Honduras 4523, CABA</div>
+        <div class="sede-info-row">
+          <div class="sede-info-item">🕐 6:00 - 23:00</div>
+          <div class="sede-info-item">👥 Media</div>
+          <div class="sede-info-item">⭐ 4.8</div>
+        </div>
+      </div>
+
+      <div class="sede-card" onclick="selectSede('Belgrano', 'Av. Monroe 2101', true)">
+        <div class="sede-card-top">
+          <div class="sede-name">FitLife Belgrano</div>
+          <div class="sede-open open">Abierto</div>
+        </div>
+        <div class="sede-address">📍 Av. Monroe 2101, CABA</div>
+        <div class="sede-info-row">
+          <div class="sede-info-item">🕐 6:00 - 22:00</div>
+          <div class="sede-info-item">👥 Baja</div>
+          <div class="sede-info-item">⭐ 4.6</div>
+        </div>
+      </div>
+
+      <div class="sede-card" onclick="selectSede('Microcentro', 'Av. Corrientes 1285', false)">
+        <div class="sede-card-top">
+          <div class="sede-name">FitLife Microcentro</div>
+          <div class="sede-open closed">Cerrado</div>
+        </div>
+        <div class="sede-address">📍 Av. Corrientes 1285, CABA</div>
+        <div class="sede-info-row">
+          <div class="sede-info-item">🕐 7:00 - 21:00</div>
+          <div class="sede-info-item">👥 —</div>
+          <div class="sede-info-item">⭐ 4.5</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SEDE DETAIL -->
+  <div class="screen" id="screen-sede-detail">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Sede</span><span class="sep">›</span><span class="current">Consultar detalles</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('sedes')">←</button>
+      <div class="top-nav-title" id="sd-name">FitLife Palermo</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Consultar detalles</div>
+      <div class="step-sub" id="sd-address">📍 Honduras 4523, CABA</div>
+
+      <div class="detail-option" onclick="goto('sede-direccion')">
+        <div class="detail-option-icon">📍</div>
+        <div class="detail-option-text">
+          <div class="detail-option-title">Ver Dirección</div>
+          <div class="detail-option-sub">Cómo llegar — Navegación GPS</div>
+        </div>
+        <span style="color:var(--green);">→</span>
+      </div>
+
+      <div class="detail-option" onclick="goto('sede-horarios')">
+        <div class="detail-option-icon">🕐</div>
+        <div class="detail-option-text">
+          <div class="detail-option-title">Ver Horarios</div>
+          <div class="detail-option-sub">Cuando la sede está abierta</div>
+        </div>
+        <span style="color:var(--green);">→</span>
+      </div>
+
+      <div class="detail-option" onclick="goto('sede-otros')">
+        <div class="detail-option-icon">ℹ️</div>
+        <div class="detail-option-text">
+          <div class="detail-option-title">Ver Otros Detalles</div>
+          <div class="detail-option-sub">Equipamiento, concurrencia, etc.</div>
+        </div>
+        <span style="color:var(--green);">→</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- SEDE DIRECCION -->
+  <div class="screen" id="screen-sede-direccion">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Detalles</span><span class="sep">›</span><span>Dirección</span><span class="sep">›</span><span class="current">¿Ir a la sede?</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('sede-detail')">←</button>
+      <div class="top-nav-title">Ver Dirección</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Ver Dirección</div>
+
+      <div class="map-placeholder" style="height:200px;">
+        <span style="font-size:48px;">📍</span>
+        <span style="color:var(--text-muted); font-size:13px;" id="sd-dir-text">Honduras 4523, CABA</span>
+      </div>
+
+      <div class="info-box">
+        <div class="info-box-title">Dirección completa</div>
+        <div class="info-box-content" id="sd-dir-full">Honduras 4523, Palermo, CABA, Argentina</div>
+      </div>
+
+      <div class="info-box">
+        <div class="info-box-title">Cómo llegar</div>
+        <div class="info-box-content">🚇 Subte D — Plaza Italia (5 min)<br>🚌 Colectivos 39, 152, 161<br>🚗 Estacionamiento gratuito</div>
+      </div>
+
+      <button class="btn-primary" onclick="goto('sede-ir-check')">¿Desea ir a la sede?</button>
+    </div>
+  </div>
+
+  <!-- SEDE IR CHECK -->
+  <div class="screen" id="screen-sede-ir-check">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Dirección</span><span class="sep">›</span><span class="current">¿Desea ir a la sede?</span></div>
+    <div class="decision-screen">
+      <div class="decision-diamond">
+        <div class="decision-diamond-inner">
+          <div class="q-icon">🗺️</div>
+          <div class="q-text">¿Desea ir<br>a la sede?</div>
+        </div>
+      </div>
+      <div class="decision-context">Si querés ir ahora, abrimos la navegación GPS</div>
+      <div class="decision-actions">
+        <button class="btn-secondary" onclick="goto('home')" style="margin-top:0;">No</button>
+        <button class="btn-primary" onclick="goto('sede-gps')">Sí, abrir GPS</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SEDE GPS -->
+  <div class="screen" id="screen-sede-gps">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="granted-screen">
+      <div class="bio-icon-big">🗺️</div>
+      <div class="granted-title">Abriendo GPS</div>
+      <div class="granted-sub">Iniciando navegación a la sede seleccionada...</div>
+      <div class="spinner" style="margin: 16px auto; width:40px; height:40px; border-width:3px;"></div>
+    </div>
+  </div>
+
+  <!-- SEDE HORARIOS -->
+  <div class="screen" id="screen-sede-horarios">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Detalles</span><span class="sep">›</span><span class="current">Ver Horarios</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('sede-detail')">←</button>
+      <div class="top-nav-title">Ver Horarios</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Consultar horarios</div>
+      <div class="step-sub">Cuando la sede está abierta</div>
+
+      <div class="info-box">
+        <div class="info-box-title">Lunes a Viernes</div>
+        <div class="info-box-content">6:00 - 23:00</div>
+      </div>
+      <div class="info-box">
+        <div class="info-box-title">Sábado</div>
+        <div class="info-box-content">8:00 - 20:00</div>
+      </div>
+      <div class="info-box">
+        <div class="info-box-title">Domingo</div>
+        <div class="info-box-content">9:00 - 18:00</div>
+      </div>
+      <div class="info-box">
+        <div class="info-box-title">Feriados</div>
+        <div class="info-box-content">9:00 - 14:00 (consultar en redes)</div>
+      </div>
+
+      <button class="btn-secondary" onclick="goto('sede-detail')">Volver</button>
+    </div>
+  </div>
+
+  <!-- SEDE OTROS -->
+  <div class="screen" id="screen-sede-otros">
+    <div class="status-bar"><span>9:41</span><div class="status-icons">▲ ● ▮▮▮</div></div>
+    <div class="step-trail"><span>Detalles</span><span class="sep">›</span><span class="current">Otros Detalles</span></div>
+    <div class="top-nav">
+      <button class="back-btn" onclick="goto('sede-detail')">←</button>
+      <div class="top-nav-title">Otros Detalles</div>
+      <div style="width:36px;"></div>
+    </div>
+    <div class="screen-content">
+      <div class="step-title">Consultar otros detalles</div>
+      <div class="step-sub">Equipamiento, nivel de concurrencia, etc.</div>
+
+      <div class="info-box">
+        <div class="info-box-title">Equipamiento disponible</div>
+        <div class="info-box-content">🏋️ 40 máquinas de fuerza<br>🚴 20 bicicletas estáticas<br>🏃 15 cintas de correr<br>🧘 Sala de clases grupales<br>🏊 Pileta climatizada</div>
+      </div>
+
+      <div class="info-box">
+        <div class="info-box-title">Nivel de concurrencia (en vivo)</div>
+        <div class="info-box-content">👥 Afluencia media — 62% de capacidad<br><span style="color:var(--green); font-size:13px; font-weight:700;">Buen momento para entrenar</span></div>
+      </div>
+
+      <div class="info-box">
+        <div class="info-box-title">Servicios</div>
+        <div class="info-box-content">🚿 Vestuarios con duchas<br>🔒 Lockers personales<br>☕ Bar / Cafetería<br>📶 WiFi gratuito<br>🅿️ Estacionamiento</div>
+      </div>
+
+      <div class="info-box">
+        <div class="info-box-title">Calificación de usuarios</div>
+        <div class="info-box-content"><span class="text-green">⭐⭐⭐⭐⭐ 4.8 / 5</span> · 342 reseñas</div>
+      </div>
+
+      <button class="btn-secondary" onclick="goto('sede-detail')">Volver</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  function goto(screenId, param) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    const target = document.getElementById('screen-' + screenId);
+    if (target) {
+      target.classList.add('active');
+      target.scrollTop = 0;
+    }
+
+    if (screenId === 'cuota-check') { setTimeout(checkCuota, 1500); }
+    if (screenId === 'send-mail') { setTimeout(() => goto('confirm-mail'), 1800); }
+    if (screenId === 'processing') { setTimeout(() => goto('pago-exitoso-check'), 2000); }
+    if (screenId === 'pago-exitoso-check') { setTimeout(checkPagoExitoso, 1800); }
+    if (screenId === 'access-granted') { setTimeout(() => goto('home'), 1800); }
+    if (screenId === 'home') { _registering = false; }
+    if (screenId === 'qr-x-check') { setTimeout(checkBioResult, 1500); }
+    if (screenId === 'qr-show') { startQRTimer(); }
+    if (screenId === 'sede-gps') { setTimeout(() => { showAlert('GPS iniciado 🗺️', 'success'); goto('home'); }, 1800); }
+    if (screenId === 'nutrition-detail' && param) { setDietDetail(param); }
+    if (screenId === 'class-detail' && param) { setClassDetail(param); }
+  }
+
+  function doLogin() {
+    const email = document.getElementById('login-email').value;
+    const pass = document.getElementById('login-pass').value;
+    if (!email || !pass) { showAlert('Completá todos los campos', 'error'); return; }
+    window._loginEmail = email;
+    goto('cuota-check');
+  }
+
+  function checkCuota() {
+    const tieneCuota = window._loginEmail !== 'vencida@test.com';
+    if (tieneCuota) {
+      document.getElementById('cuota-result').innerHTML = `
+        <div style="background:#F0F8F2; border:1px solid var(--green); border-radius:var(--radius-sm); padding:14px; text-align:center;">
+          <div style="color:var(--green); font-weight:700; margin-bottom:4px;">✓ Cuota al día</div>
+          <div style="font-size:12px; color:var(--text-muted);">Acceso concedido — redirigiendo...</div>
+        </div>
+      `;
+      setTimeout(() => goto('access-granted'), 1200);
+    } else {
+      document.getElementById('cuota-result').innerHTML = `
+        <div style="background:rgba(224,72,72,0.08); border:1px solid var(--red); border-radius:var(--radius-sm); padding:14px; text-align:center;">
+          <div style="color:var(--red); font-weight:700; margin-bottom:4px;">✗ Cuota vencida</div>
+          <div style="font-size:12px; color:var(--text-muted);">Continuando...</div>
+        </div>
+      `;
+      setTimeout(() => goto('renovar-check'), 1200);
+    }
+  }
+
+  function doRegister() {
+    const name = document.getElementById('reg-name').value;
+    const email = document.getElementById('reg-email').value;
+    const pass = document.getElementById('reg-pass').value;
+    if (!name || !email || !pass) { showAlert('Completá todos los campos', 'error'); return; }
+    document.getElementById('sent-mail-addr').textContent = email;
+    document.getElementById('confirm-mail-addr').textContent = email;
+    const nameParts = name.trim().split(' ');
+    document.getElementById('home-username').innerHTML = nameParts[0] + (nameParts[1] ? ' <span>' + nameParts[1] + '</span>' : '');
+    document.getElementById('perfil-name').textContent = name;
+    document.getElementById('perfil-mail').textContent = email;
+    goto('send-mail');
+  }
+
+  let _registering = false;
+  function doSignTerms() {
+    if (!document.getElementById('terms-accept').checked) {
+      showAlert('Debés aceptar los términos', 'error');
+      return;
+    }
+    _registering = true;
+    goto('plan');
+  }
+
+  let _selectedPlan = null;
+  function selectPlan(el, plan, price) {
+    document.querySelectorAll('.plan-card').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    _selectedPlan = { plan, price };
+    document.getElementById('pagar-plan-label').textContent = plan;
+    document.getElementById('payment-plan-label').textContent = plan + ' — ' + price + '/mes';
+    document.getElementById('home-plan-label').textContent = 'Plan ' + plan + ' activo';
+    document.getElementById('perfil-plan-badge').textContent = '⭐ Plan ' + plan;
+    const btn = document.getElementById('btn-continue-plan');
+    btn.style.opacity = '1';
+    btn.style.pointerEvents = 'auto';
+  }
+
+  let _lastPaymentMethod = '';
+  function procesarPago(metodo) {
+    _lastPaymentMethod = metodo;
+    document.getElementById('processing-method-label').textContent = metodo;
+    goto('processing');
+  }
+
+  function elegirMetodo(metodo) {
+    _lastPaymentMethod = metodo;
+    document.getElementById('card-form-method').textContent = metodo;
+    goto('card-form');
+  }
+
+  function formatCardNumber(el) {
+    let v = el.value.replace(/\D/g, '').substring(0, 16);
+    el.value = v.replace(/(\d{4})(?=\d)/g, '$1 ');
+    updatePreview();
+  }
+
+  function formatExp(el) {
+    let v = el.value.replace(/\D/g, '').substring(0, 4);
+    if (v.length >= 3) v = v.substring(0, 2) + '/' + v.substring(2);
+    el.value = v;
+    updatePreview();
+  }
+
+  function updatePreview() {
+    const num = document.getElementById('card-number').value;
+    const name = document.getElementById('card-name').value;
+    const exp = document.getElementById('card-exp').value;
+    document.getElementById('prev-number').textContent = num || '•••• •••• •••• ••••';
+    document.getElementById('prev-name').textContent = (name || 'NOMBRE APELLIDO').toUpperCase();
+    document.getElementById('prev-exp').textContent = exp || 'MM/AA';
+  }
+
+  function submitCard() {
+    const num = document.getElementById('card-number').value.replace(/\s/g, '');
+    const name = document.getElementById('card-name').value;
+    const exp = document.getElementById('card-exp').value;
+    const cvv = document.getElementById('card-cvv').value;
+    if (num.length < 13 || !name || exp.length < 5 || cvv.length < 3) {
+      showAlert('Completá todos los datos', 'error');
+      return;
+    }
+    document.getElementById('processing-method-label').textContent = _lastPaymentMethod;
+    goto('processing');
+  }
+
+  function checkPagoExitoso() {
+    const exitoso = _lastPaymentMethod !== 'MercadoPago';
+    if (exitoso) { goto('access-granted'); } else { goto('reintentar-check'); }
+  }
+
+  function selectNutObj(el, key, label) {
+    document.querySelectorAll('#screen-nutrition .objective-card').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    showAlert('Objetivo: ' + label, 'success');
+  }
+
+  function setDietDetail(name) {
+    const data = {
+      'Mediterránea': { cal: '1.800 kcal', emoji: '🫒' },
+      'Alta en proteínas': { cal: '2.200 kcal', emoji: '🥩' },
+      'Plant-based': { cal: '1.600 kcal', emoji: '🌱' }
+    };
+    const d = data[name] || data['Mediterránea'];
+    document.getElementById('diet-detail-title').textContent = name;
+    document.getElementById('diet-detail-cal').textContent = d.cal;
+    document.getElementById('diet-detail-emoji').textContent = d.emoji;
+  }
+
+  let currentPoints = 2450;
+  let _canjeItem = null;
+  let _canjeCost = 0;
+
+  function selectBeneficio(name, cost) {
+    _canjeItem = name;
+    _canjeCost = cost;
+    document.getElementById('canje-item-name').textContent = name;
+    document.getElementById('canje-saldo').textContent = currentPoints.toLocaleString() + ' pts';
+    document.getElementById('canje-cost').textContent = '- ' + cost.toLocaleString() + ' pts';
+    document.getElementById('canje-restante').textContent = (currentPoints - cost).toLocaleString() + ' pts';
+    if (currentPoints < cost) { showAlert('No tenés suficientes puntos', 'error'); return; }
+    goto('canje-check');
+  }
+
+  function confirmarCanje() {
+    currentPoints -= _canjeCost;
+    document.getElementById('display-points-saldo').textContent = currentPoints.toLocaleString();
+    document.getElementById('display-points-corner').textContent = currentPoints.toLocaleString() + ' pts';
+    document.getElementById('home-points').textContent = currentPoints.toLocaleString();
+    document.getElementById('exito-canje-item').textContent = _canjeItem;
+    document.getElementById('exito-canje-code').textContent = 'FL-2026-' + Math.random().toString(36).substring(2,6).toUpperCase();
+    goto('canje-exitoso');
+  }
+
+  function cancelarCanje() {
+    showAlert('Canje cancelado', 'error');
+    goto('puntos-beneficios');
+  }
+
+  function filterTipo(btn, tipo) {
+    btn.parentElement.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  function filterCat(btn) {
+    document.querySelectorAll('.filter-row .filter-chip').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+  }
+
+  function setClassDetail(param) {
+    const [name, cat, tipo, dur, nivel, emoji] = param.split('|');
+    document.getElementById('cd-name').textContent = name;
+    document.getElementById('cd-cat').textContent = cat;
+    document.getElementById('cd-tipo').textContent = tipo === 'Virtual' ? '🎥 Virtual' : '📍 Presencial';
+    document.getElementById('cd-dur').textContent = '⏱ ' + dur;
+    document.getElementById('cd-nivel').textContent = '📊 ' + nivel;
+    document.getElementById('cd-hero').textContent = emoji;
+    document.getElementById('inscribirse-class-name').textContent = name;
+    document.getElementById('conf-class').textContent = name;
+    document.getElementById('conf-dur').textContent = dur;
+    document.getElementById('rc-class').textContent = name;
+  }
+
+  let _selectedHorario = '';
+  function selectHorarioChip(el) {
+    document.querySelectorAll('.horario-chip').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    _selectedHorario = el.textContent;
+    document.getElementById('conf-horario').textContent = _selectedHorario;
+    document.getElementById('rc-horario').textContent = _selectedHorario;
+    const btn = document.getElementById('btn-ir-inscripcion');
+    btn.style.opacity = '1';
+    btn.style.pointerEvents = 'auto';
+  }
+
+  function confirmarReserva() { goto('reserva-confirmada'); }
+
+  function filterRoutine(el, key) {
+    document.querySelectorAll('#screen-routines .objective-card').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+  }
+
+  let qrTimer = null;
+  let _scanLineEl = null;
+
+  function startBio() {
+    document.getElementById('bio-state-init').style.display = 'none';
+    document.getElementById('bio-state-checking').style.display = 'block';
+    document.getElementById('face-emoji').textContent = '📷';
+    const frame = document.getElementById('face-scan-frame');
+    if (!_scanLineEl) {
+      _scanLineEl = document.createElement('div');
+      _scanLineEl.className = 'face-scan-line';
+      frame.appendChild(_scanLineEl);
+    }
+    setTimeout(() => { goto('qr-x-check'); }, 2200);
+  }
+
+  function checkBioResult() {
+    const success = Math.random() > 0.3;
+    if (success) { goto('qr-show'); } else { goto('qr-reintentar'); }
+    document.getElementById('bio-state-init').style.display = 'block';
+    document.getElementById('bio-state-checking').style.display = 'none';
+    document.getElementById('face-emoji').textContent = '😊';
+    if (_scanLineEl && _scanLineEl.parentNode) {
+      _scanLineEl.parentNode.removeChild(_scanLineEl);
+      _scanLineEl = null;
+    }
+  }
+
+  function startQRTimer() {
+    let seconds = 300;
+    clearInterval(qrTimer);
+    document.getElementById('qr-countdown').textContent = '5:00';
+    qrTimer = setInterval(() => {
+      seconds--;
+      const m = Math.floor(seconds / 60);
+      const s = seconds % 60;
+      document.getElementById('qr-countdown').textContent = m + ':' + (s < 10 ? '0' : '') + s;
+      if (seconds <= 0) {
+        clearInterval(qrTimer);
+        showAlert('QR expirado', 'error');
+        goto('qr-bio');
+      }
+    }, 1000);
+  }
+
+  function selectSede(name, address, isOpen) {
+    document.getElementById('sd-name').textContent = 'FitLife ' + name;
+    document.getElementById('sd-address').textContent = '📍 ' + address + ', CABA';
+    document.getElementById('sd-dir-text').textContent = address + ', CABA';
+    document.getElementById('sd-dir-full').textContent = address + ', ' + name + ', CABA, Argentina';
+    goto('sede-detail');
+  }
+
+  function showAlert(msg, type) {
+    const alert = document.getElementById('global-alert');
+    alert.textContent = (type === 'success' ? '✓ ' : '✗ ') + msg;
+    alert.className = 'alert show ' + type;
+    setTimeout(() => { alert.className = 'alert'; }, 2500);
+  }
+
+  setTimeout(() => goto('auth-choice'), 2000);
+</script>
+</body>
+</html>
