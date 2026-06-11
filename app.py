@@ -26,10 +26,8 @@ SCANIA_PATENTES = ['AD247MQ', 'AE423IW']
 LIMITE_VELOCIDAD = 88
 BASE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR35NkYPtJrOrdYHLGUH7GIW93s5cPAqQ0zEk5fP1c3gvErwbUW7HJ2OeWBYaBVsYKVmCf0yhLvs6eG/pub?output=csv"
 GID_TEL  = "0"
-GID_UNID = "882343299"
 GID_VEL  = "1563993963"
 URL_TEL  = f"{BASE_URL}&gid={GID_TEL}"
-URL_UNID = f"{BASE_URL}&gid={GID_UNID}"
 URL_VEL  = f"{BASE_URL}&gid={GID_VEL}"
 CARGA_URL = "http://bi.sistemaexpreso.com.ar/reporte_hojas.xlsx"
 DARK_CSS = """
@@ -136,7 +134,6 @@ st.sidebar.image(LOGO_URL, width=160)
 def cargar_datos():
     try:
         df1 = pd.read_csv(URL_TEL)
-        df2 = pd.read_csv(URL_UNID)
         def limpiar(df):
             df.columns = [str(c).strip().upper() for c in df.columns]
             df = df.loc[:, ~df.columns.duplicated()]
@@ -149,13 +146,12 @@ def cargar_datos():
                 elif "TAG"       in c:                                  cm[c] = "TAG"
                 elif "FECHA"     in c or "DATE"     in c:              cm[c] = "FECHA"
                 elif "L/100"     in c or "CONSUMO C" in c:             cm[c] = "L100KM"
-                elif "RALENT"    in c:                                  cm[c] = "RALENTI"
                 elif "TIEMPO"    in c and "MOTOR"   in c:              cm[c] = "TIEMPO_MOTOR"
                 elif "EMPRESA"   in c:                                  cm[c] = "EMPRESA"
             df = df.rename(columns=cm).loc[:, ~df.rename(columns=cm).columns.duplicated()]
             if "DOMINIO" in df.columns:
                 df["DOMINIO"] = df["DOMINIO"].astype(str).str.strip().str.upper()
-            for col in ["LITROS", "KM", "L100KM", "RALENTI"]:
+            for col in ["LITROS", "KM", "L100KM"]:
                 if col in df.columns:
                     serie = df[col]
                     if isinstance(serie, pd.DataFrame):
@@ -166,31 +162,13 @@ def cargar_datos():
                 df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce", dayfirst=True)
             return df
         df1 = limpiar(df1)
-        df2 = limpiar(df2)
         if "L100KM" not in df1.columns and "LITROS" in df1.columns and "KM" in df1.columns:
             df1["L100KM"] = (df1["LITROS"] / df1["KM"].replace(0, np.nan) * 100).round(2)
-        if 'RALENTI' in df2.columns and 'DOMINIO' in df2.columns:
-            if 'FECHA' in df2.columns and 'FECHA' in df1.columns:
-                df2_ral = df2[['DOMINIO','FECHA','RALENTI']].copy()
-                df2_ral = df2_ral[df2_ral['RALENTI'] > 0]
-                df2_ral['_MES'] = df2_ral['FECHA'].dt.to_period('M')
-                df1['_MES']     = df1['FECHA'].dt.to_period('M')
-                df1 = df1.merge(
-                    df2_ral[['DOMINIO','_MES','RALENTI']].rename(columns={'RALENTI':'_RAL_u'}),
-                    on=['DOMINIO','_MES'], how='left'
-                )
-                if 'RALENTI' not in df1.columns:
-                    df1['RALENTI'] = df1['_RAL_u'].fillna(0)
-                else:
-                    df1['RALENTI'] = df1['RALENTI'].combine_first(df1['_RAL_u']).fillna(0)
-                df1.drop(columns=['_RAL_u','_MES'], inplace=True, errors='ignore')
         if "EMPRESA" in df1.columns:
             df1 = df1[df1["EMPRESA"].str.upper().str.contains("LAD|DIEMAR", na=False)]
-        if "DOMINIO" in df2.columns and not df2.empty:
-            lad_units = df2["DOMINIO"].dropna().unique()
-            if len(lad_units) > 0:
-                df1 = df1[df1["DOMINIO"].isin(lad_units)]
-        return df1, df2
+        # Hoja UNIDADES eliminada. Patentes y todo lo demás salen de TELEMETRÍA.
+        # Ralentí eliminado del flujo.
+        return df1, pd.DataFrame()
     except Exception as e:
         st.error(f"Error cargando datos: {e}")
         return pd.DataFrame(), pd.DataFrame()
@@ -233,7 +211,7 @@ def cargar_velocidad():
     except Exception:
         return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH"])
 @st.cache_data(ttl=3600)
-def cargar_carga():
+def cargar_carga(tractores_validos=None):
     try:
         import re
         df = pd.read_excel(CARGA_URL)
@@ -251,9 +229,23 @@ def cargar_carga():
         df = df[(df[col_peso] > 0) & df[col_fecha].notna()].copy()
         def norm_pat(p):
             return re.sub(r'\s+', '', str(p).strip().upper())
-        df['_pats'] = df[col_unid].astype(str).str.split(',')
-        df = df.explode('_pats')
-        df['DOMINIO']  = df['_pats'].apply(norm_pat)
+        # La celda UNIDADES puede traer "TRACTOR, ACOPLADO" en cualquier orden.
+        # Estrategia: dentro de cada celda, elegir la patente que figure en la flota
+        # de tractores (telemetría). Si ninguna matchea → tomar la primera (fallback).
+        # Así el peso NUNCA se duplica y siempre se asigna al tractor real.
+        tractores_set = set()
+        if tractores_validos is not None:
+            tractores_set = {norm_pat(t) for t in tractores_validos if pd.notna(t)}
+        def elegir_tractor(celda):
+            pats = [norm_pat(p) for p in str(celda).split(',') if str(p).strip()]
+            if not pats:
+                return ''
+            if tractores_set:
+                for p in pats:
+                    if p in tractores_set:
+                        return p
+            return pats[0]
+        df['DOMINIO'] = df[col_unid].apply(elegir_tractor)
         df['MES']      = df[col_fecha].dt.to_period('M')
         df['PESO_TON'] = df[col_peso] / 1000.0
         return (df.groupby(['DOMINIO','MES'])
@@ -319,15 +311,6 @@ def calcular_ier(df, df_vel=None, df_carga=None):
     if 'MES_PERIODO' in df_c.columns:
         agg_dict['MESES'] = ('MES_PERIODO','nunique')
     agg = df_c.groupby('DOMINIO').agg(**agg_dict).reset_index()
-    if 'RALENTI' in df_c.columns:
-        ral = df_c.groupby('DOMINIO').agg(_RAL=('RALENTI','sum'), _LTS=('LITROS','sum')).reset_index()
-        ral['_RATIO'] = ral['_RAL'] / ral['_LTS'].replace(0, np.nan)
-        ral['RALENTI_PCT'] = np.where(ral['_RATIO'].between(0,1.0), (ral['_RATIO']*100).clip(0,100).round(2), 0.0)
-        ral['RALENTI_PCT'] = ral['RALENTI_PCT'].fillna(0)
-        agg = agg.merge(ral[['DOMINIO','RALENTI_PCT']], on='DOMINIO', how='left')
-    else:
-        agg['RALENTI_PCT'] = 0.0
-    agg['RALENTI_PCT'] = agg['RALENTI_PCT'].fillna(0.0)
     if df_vel is not None and not df_vel.empty and 'DOMINIO' in df_vel.columns:
         vel_counts = df_vel.groupby('DOMINIO').agg(
             EXCESOS=('DOMINIO','count'),
@@ -374,7 +357,7 @@ def calcular_ier(df, df_vel=None, df_carga=None):
         v = x.dropna(); return v.mean() if len(v)>0 else np.nan
     modelo_avgs = agg.groupby('MODELO').agg(
         L100KM_MOD=('L100KM','mean'), KM_MOD=('KM','mean'),
-        RAL_MOD=('RALENTI_PCT','mean'), EXCESOS_MOD=('EXCESOS','mean'),
+        EXCESOS_MOD=('EXCESOS','mean'),
         SEVERIDAD_MOD=('SEVERIDAD','mean'),
         TONKML_MOD=('TONKML',_safe_mean)).reset_index()
     agg = agg.merge(modelo_avgs, on='MODELO', how='left')
@@ -400,7 +383,6 @@ def calcular_ier(df, df_vel=None, df_carga=None):
     # Ponderación con renormalización si no hay carga:
     #   CON carga:  40% L/100km · 40% ton·km/L · 10% KM · 10% excesos severidad
     #   SIN carga:  80% L/100km · 10% KM · 10% excesos severidad
-    # Ralentí excluido del cálculo (dato S-Way no confiable)
     if tiene_carga:
         agg['IER'] = (
             0.40 * agg['SCORE_CONSUMO'] +
@@ -426,16 +408,19 @@ def calcular_ier(df, df_vel=None, df_carga=None):
     agg['TONKML']     = agg['TONKML'].fillna(0).round(2)
     agg['TONKML_MOD'] = agg['TONKML_MOD'].fillna(0).round(2)
     keep = ['DOMINIO','MODELO','IER','CLASIFICACION',
-            'L100KM','L100KM_MOD','RALENTI_PCT','RAL_MOD',
+            'L100KM','L100KM_MOD',
             'KM','KM_MOD','LITROS','EXCESOS','SEVERIDAD','SEVERIDAD_MOD','VEL_MAX','EXCESOS_MOD',
             'PESO_TON','TONKML','TONKML_MOD',
             'SCORE_CONSUMO','SCORE_KM','SCORE_VEL','SCORE_CARGA']
     if 'MESES' in agg.columns: keep.append('MESES')
     return agg[keep].sort_values('IER', ascending=False).reset_index(drop=True)
 with st.spinner('Cargando telemetría, velocidades y datos de carga...'):
-    df_raw, df_unid = cargar_datos()
-    df_vel_raw      = cargar_velocidad()
-    df_carga_raw    = cargar_carga()
+    df_raw, _      = cargar_datos()
+    df_vel_raw     = cargar_velocidad()
+    # Tractores tomados de TELEMETRÍA. Se pasan a cargar_carga para identificar
+    # la patente correcta cuando UNIDADES del BI trae tractor+acoplado en la misma celda.
+    tractores_flota = tuple(df_raw['DOMINIO'].dropna().unique()) if (df_raw is not None and not df_raw.empty and 'DOMINIO' in df_raw.columns) else ()
+    df_carga_raw    = cargar_carga(tractores_flota)
 if df_raw.empty:
     st.warning('No se pudieron cargar datos.')
     st.stop()
@@ -463,6 +448,9 @@ if 'FECHA' in df.columns and df['FECHA'].notna().any():
         hasta_idx = st.sidebar.selectbox('Hasta (mes/año)', options=periodos_str, index=len(periodos_str)-1)
         desde_periodo = pd.Period(desde_idx, 'M')
         hasta_periodo = pd.Period(hasta_idx, 'M')
+        # Exponer globalmente para que otras secciones (Datos Operativos) puedan filtrar
+        st.session_state['desde_periodo'] = desde_periodo
+        st.session_state['hasta_periodo'] = hasta_periodo
         df = df[(df['FECHA'].dt.to_period('M')>=desde_periodo)&(df['FECHA'].dt.to_period('M')<=hasta_periodo)]
     marcas_disp   = sorted(df['MARCA'].dropna().unique().tolist())   if 'MARCA'   in df.columns else []
     marcas_sel    = st.sidebar.multiselect('Marca', marcas_disp, default=marcas_disp)
@@ -477,16 +465,6 @@ df['MES_PERIODO'] = df['FECHA'].dt.to_period('M')
 df['MES_NUM']     = df['FECHA'].dt.month
 meses_df = df.groupby('MES_PERIODO').agg(LITROS=('LITROS','sum'),KM=('KM','sum')).reset_index().sort_values('MES_PERIODO')
 meses_df['L100'] = (meses_df['LITROS']/meses_df['KM'].replace(0,np.nan)*100).round(2)
-ralenti_total = df['RALENTI'].sum() if 'RALENTI' in df.columns else 0
-ralenti_delta_txt = ''
-if 'RALENTI' in df.columns and 'MES_PERIODO' in df.columns:
-    _mg = df.groupby('MES_PERIODO').agg(_RAL=('RALENTI','sum'),_LTS=('LITROS','sum')).reset_index().sort_values('MES_PERIODO')
-    if len(_mg)>=2:
-        _curr=_mg.iloc[-1]; _prev=_mg.iloc[-2]
-        _pct_curr=_curr['_RAL']/_curr['_LTS']*100 if _curr['_LTS']>0 else 0
-        _pct_prev=_prev['_RAL']/_prev['_LTS']*100 if _prev['_LTS']>0 else 0
-        _dr=_pct_curr-_pct_prev
-        ralenti_delta_txt=f"{'▲' if _dr>0 else '▼'} {abs(_dr):.1f}pp vs mes ant."
 df_full_clean = df_full[df_full['FECHA'].notna()&(df_full['KM']>0)].copy()
 df_full_clean['MES_PERIODO'] = df_full_clean['FECHA'].dt.to_period('M')
 meses_hist_full = df_full_clean.groupby('MES_PERIODO').agg(LITROS=('LITROS','sum'),KM=('KM','sum')).reset_index().sort_values('MES_PERIODO')
@@ -521,7 +499,6 @@ if pg == "Dashboard Principal":
     l100_prom  = round(lts_total/kms_total*100,2) if kms_total>0 else 0
     costo_est  = lts_total*precio_gasoil
     n_unidades = df['DOMINIO'].nunique() if 'DOMINIO' in df.columns else 0
-    ralenti_pct = round(ralenti_total/lts_total*100,1) if lts_total>0 else 0
     if len(meses_df)>=2:
         delta_l100 = meses_df['L100'].iloc[-1]-meses_df['L100'].iloc[-2]
         delta_txt  = f"{'▲' if delta_l100>0 else '▼'} {abs(delta_l100):.2f} vs mes anterior"
@@ -534,11 +511,9 @@ if pg == "Dashboard Principal":
     kpi(k1,'','⛽ Litros totales',f'{lts_total:,.0f}',f'litros {anio_sel}')
     kpi(k2,'','🛣️ KM recorridos',f'{kms_total:,.0f}',f'kilómetros {anio_sel}')
     kpi(k3,delta_col,'📊 L/100km flota',f'{l100_prom:.2f}',delta_txt)
-    k4,k5,k6 = st.columns(3)
+    k4,k5 = st.columns(2)
     kpi(k4,'kpi-amber','💰 Costo estimado',f'${costo_est/1e6:.1f}M',f'@ ${precio_gasoil:,.0f}/L')
     kpi(k5,'kpi-green','🚛 Unidades activas',f'{n_unidades}','dominios únicos')
-    _ral_sub = (f'{ralenti_total:,.0f} L · {ralenti_delta_txt}' if ralenti_delta_txt else f'{ralenti_total:,.0f} L en ralentí')
-    kpi(k6,'kpi-amber','⏱️ % Ralentí',f'{ralenti_pct:.1f}%',_ral_sub)
     st.divider()
     st.markdown(f'<div class="sec-title">Rendimiento por Modelo — {anio_sel}</div>', unsafe_allow_html=True)
     def stats_modelo(patentes_lista):
@@ -594,8 +569,7 @@ if pg == "Dashboard Principal":
         f"<b>40%</b> L/100km &nbsp;·&nbsp; "
         f"<b>40%</b> ton·km/L {'📦' if tiene_carga_ier else '⚠️ sin datos'} &nbsp;·&nbsp; "
         f"<b>10%</b> KM totales &nbsp;·&nbsp; "
-        f"<b>10%</b> Severidad vel. {'✅' if tiene_vel else '⚠️'} "
-        f"&nbsp;·&nbsp; <i>Ralentí: excluido (dato S-Way no confiable)</i>"
+        f"<b>10%</b> Severidad vel. {'✅' if tiene_vel else '⚠️'}"
     )
     st.markdown(f"""<div class="ier-info-box">
     <b>¿Qué es el IER v5?</b> Métrica estadísticamente justa: cada camión se compara <b>solo contra el promedio de su propio modelo</b> — Stralis vs Stralis, S‑Way vs S‑Way, Scania vs Scania.<br>
@@ -636,11 +610,9 @@ if pg == "Dashboard Principal":
             hover=[]
             for _,row in subset.iterrows():
                 tkml_txt=(f"Carga: {row['TONKML']:.1f} ton·km/L (prom: {row['TONKML_MOD']:.1f})" if row['TONKML']>0 else "Carga: sin datos")
-                ral_txt = f"⚠️ dato no confiable (S-Way)" if row['MODELO']=='S-Way' else f"{row['RALENTI_PCT']:.1f}%"
                 severidad = row.get('SEVERIDAD', 0)
                 hover.append(f"<b>{row['DOMINIO']}</b> ({row['MODELO']})<br>IER: <b>{row['IER']:.1f}</b> — {row['CLASIFICACION']}<br>"
                              f"L/100km: {row['L100KM']:.2f} (prom {row['MODELO']}: {row['L100KM_MOD']:.2f}) score: {row['SCORE_CONSUMO']:.2f}<br>"
-                             f"% Ralentí: {ral_txt} (display solo, no entra en IER)<br>"
                              f"Vel. severidad: {severidad:.0f} km/h acum. · {int(row['EXCESOS'])} eventos · score: {row['SCORE_VEL']:.2f}<br>"
                              f"Vel. máx: {row['VEL_MAX']:.0f} km/h<br>KM total: {row['KM']:,.0f}  score: {row['SCORE_KM']:.2f}<br>"
                              f"{tkml_txt}  score: {row['SCORE_CARGA']:.2f}")
@@ -658,13 +630,12 @@ if pg == "Dashboard Principal":
         st.plotly_chart(fig_ier, use_container_width=True)
         st.caption('Verde = mejor que su modelo · Rojo = peor · Línea amarilla = base 100 · Hover para detalle completo')
         with st.expander('📋 Ver tabla detallada IER (todos los componentes)'):
-            show_cols=['DOMINIO','MODELO','IER','CLASIFICACION','L100KM','L100KM_MOD','RALENTI_PCT','RAL_MOD',
+            show_cols=['DOMINIO','MODELO','IER','CLASIFICACION','L100KM','L100KM_MOD',
                        'EXCESOS','SEVERIDAD','SEVERIDAD_MOD','VEL_MAX','KM','PESO_TON','TONKML','TONKML_MOD',
                        'SCORE_CONSUMO','SCORE_KM','SCORE_VEL','SCORE_CARGA']
             ier_show=df_ier[[c for c in show_cols if c in df_ier.columns]].copy()
             col_rename={'DOMINIO':'Patente','MODELO':'Modelo','IER':'IER','CLASIFICACION':'Clasificación',
                 'L100KM':'L/100km','L100KM_MOD':'Prom L/100km',
-                'RALENTI_PCT':'% Ralentí (⚠️ no entra en IER)','RAL_MOD':'% Ral Prom',
                 'EXCESOS':f'Cant. Excesos >{LIMITE_VELOCIDAD}km/h',
                 'SEVERIDAD':'Severidad total (km/h acum.)','SEVERIDAD_MOD':'Sev. total prom mod.',
                 'VEL_MAX':'Vel. Máx (km/h)',
@@ -708,7 +679,7 @@ if pg == "Dashboard Principal":
             st.dataframe(vel_show, use_container_width=True, hide_index=True)
     st.divider()
     with st.expander(f'Ver datos completos {anio_sel}'):
-        cols_s=[c for c in ['DOMINIO','MARCA','MODELO','FECHA','KM','LITROS','L100KM','RALENTI'] if c in df.columns]
+        cols_s=[c for c in ['DOMINIO','MARCA','MODELO','FECHA','KM','LITROS','L100KM'] if c in df.columns]
         st.dataframe(df[cols_s], use_container_width=True, height=380)
     st.caption(f'Datos {anio_sel}: Google Sheets Expreso Diemar | Precio: {precio_fuente} | Excesos: satelital >{LIMITE_VELOCIDAD} km/h | Actualización cada 10 min')
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -916,9 +887,6 @@ elif pg == "Análisis por Patente":
                     comp_bar('📦 ton·km/L',ier_row['SCORE_CARGA'],40)
                     comp_bar('🛣️ KM totales',ier_row['SCORE_KM'],10)
                     comp_bar(f'🚨 Severidad vel.',ier_row['SCORE_VEL'],10)
-                    # Ralentí: solo display
-                    ral_display = "⚠️ dato no confiable" if modelo_pat=='S-Way' else f"{ier_row['RALENTI_PCT']:.1f}%"
-                    st.markdown(f'<div class="ier-comp-row" style="opacity:.55;"><div class="ier-comp-label">⏱️ Ralentí <span style="color:#475569;">(excluido)</span></div><div class="ier-comp-val" style="color:#64748b;">{ral_display}</div></div>', unsafe_allow_html=True)
                 with ia3:
                     st.markdown(f'<div style="font-size:.8rem;color:#94a3b8;font-weight:600;margin-bottom:6px;">Esta unidad vs. promedio {modelo_pat}</div>', unsafe_allow_html=True)
                     delta_l100=ier_row['L100KM']-ier_row['L100KM_MOD']
@@ -980,7 +948,7 @@ elif pg == "Datos Operativos":
     with col_logo4: st.image(LOGO_URL, width=130)
     with col_title4:
         st.markdown(f"""<div style='padding:8px 0;'>
-        <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>Datos Operativos — {anio_sel}</div>
+        <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>Datos Operativos</div>
         <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Peso entregado por patente &middot; Ton·km/L &middot; Productividad de carga</div>
         </div>""", unsafe_allow_html=True)
     if df_carga_raw is None or df_carga_raw.empty:
@@ -988,25 +956,37 @@ elif pg == "Datos Operativos":
         st.stop()
     # Solo patentes LAD (las mismas del df de telemetría)
     _patentes_ld = df['DOMINIO'].dropna().unique()
-    df_carga_anio=df_carga_raw[
-        (df_carga_raw['MES'].apply(lambda p:p.year)==anio_sel) &
-        (df_carga_raw['DOMINIO'].isin(_patentes_ld))
-    ].copy() if not df_carga_raw.empty else pd.DataFrame()
-    if df_carga_anio.empty: st.warning(f'Sin datos de carga para {anio_sel}.'); st.stop()
+    # Filtro temporal: respetar el rango Desde/Hasta del sidebar si está definido
+    _desde = st.session_state.get('desde_periodo', None)
+    _hasta = st.session_state.get('hasta_periodo', None)
+    if _desde is not None and _hasta is not None:
+        df_carga_anio = df_carga_raw[
+            (df_carga_raw['MES'] >= _desde) &
+            (df_carga_raw['MES'] <= _hasta) &
+            (df_carga_raw['DOMINIO'].isin(_patentes_ld))
+        ].copy() if not df_carga_raw.empty else pd.DataFrame()
+        _rango_txt = f'{_desde} a {_hasta}' if _desde != _hasta else f'{_desde}'
+    else:
+        df_carga_anio = df_carga_raw[
+            (df_carga_raw['MES'].apply(lambda p:p.year)==anio_sel) &
+            (df_carga_raw['DOMINIO'].isin(_patentes_ld))
+        ].copy() if not df_carga_raw.empty else pd.DataFrame()
+        _rango_txt = f'{anio_sel}'
+    if df_carga_anio.empty: st.warning(f'Sin datos de carga para {_rango_txt}.'); st.stop()
     df_carga_anio['MES_STR']=df_carga_anio['MES'].astype(str)
     df_carga_anio['MODELO']=df_carga_anio['DOMINIO'].apply(asignar_modelo)
-    st.markdown(f'<div class="sec-title">Resumen de Carga — {anio_sel}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sec-title">Resumen de Carga — {_rango_txt}</div>', unsafe_allow_html=True)
     peso_total=df_carga_anio['PESO_TON'].sum(); n_pat_con_carga=df_carga_anio['DOMINIO'].nunique()
     peso_prom_pat=peso_total/n_pat_con_carga if n_pat_con_carga>0 else 0; meses_con_carga=df_carga_anio['MES'].nunique()
     def kpi2(cont,color,label,value,sub=''):
         cont.markdown(f'<div class="kpi-card {color}"><div class="kpi-label">{label}</div><div class="kpi-value">{value}</div><div class="kpi-sub">{sub}</div></div>', unsafe_allow_html=True)
     ck1,ck2,ck3,ck4=st.columns(4)
-    kpi2(ck1,'kpi-purple','📦 Peso Total Entregado',f'{peso_total:,.1f}',f'toneladas {anio_sel}')
+    kpi2(ck1,'kpi-purple','📦 Peso Total Entregado',f'{peso_total:,.1f}',f'toneladas {_rango_txt}')
     kpi2(ck2,'','🚛 Patentes con Carga',f'{n_pat_con_carga}',f'de {df["DOMINIO"].nunique()} activas')
-    kpi2(ck3,'kpi-green','📊 Prom. por Patente',f'{peso_prom_pat:,.1f}','toneladas anuales')
-    kpi2(ck4,'kpi-amber','📅 Meses con datos',f'{meses_con_carga}',f'de {anio_sel}')
+    kpi2(ck3,'kpi-green','📊 Prom. por Patente',f'{peso_prom_pat:,.1f}','toneladas período')
+    kpi2(ck4,'kpi-amber','📅 Meses con datos',f'{meses_con_carga}',f'{_rango_txt}')
     st.divider()
-    st.markdown(f'<div class="sec-title">📦 Peso Entregado por Mes y Patente (toneladas) — {anio_sel}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sec-title">📦 Peso Entregado por Mes y Patente (toneladas) — {_rango_txt}</div>', unsafe_allow_html=True)
     pivot_carga=(df_carga_anio.pivot_table(index='DOMINIO',columns='MES_STR',values='PESO_TON',aggfunc='sum',fill_value=0).reset_index())
     pivot_carga['TOTAL']=pivot_carga.drop(columns='DOMINIO').sum(axis=1)
     pivot_carga=pivot_carga.sort_values('TOTAL',ascending=False)
@@ -1027,7 +1007,7 @@ elif pg == "Datos Operativos":
         for c in meses_cols+['TOTAL']: pivot_show[c]=pivot_show[c].apply(lambda x:f'{x:,.1f}' if x>0 else '—')
         pivot_show=pivot_show.rename(columns={'DOMINIO':'Patente','TOTAL':'TOTAL año'})
         st.dataframe(pivot_show, use_container_width=True, hide_index=True)
-    st.markdown(f'<div class="sec-title">Evolución Mensual de Peso Entregado por Patente — {anio_sel}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sec-title">Evolución Mensual de Peso Entregado por Patente — {_rango_txt}</div>', unsafe_allow_html=True)
     COLORES_PAT=['#3b82f6','#f97316','#22c55e','#a855f7','#f43f5e','#06b6d4','#eab308','#84cc16']
     fig_bar_c=go.Figure()
     for i,(_,row) in enumerate(pivot_carga.iterrows()):
@@ -1040,7 +1020,7 @@ elif pg == "Datos Operativos":
         height=420,margin=dict(l=10,r=10,t=50,b=70))
     st.plotly_chart(fig_bar_c, use_container_width=True)
     st.divider()
-    st.markdown(f'<div class="sec-title">📐 Detalle ton·km/L (Productividad de Carga) — {anio_sel}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sec-title">📐 Detalle ton·km/L (Productividad de Carga) — {_rango_txt}</div>', unsafe_allow_html=True)
     st.markdown("""<div class="ier-info-box"><b>¿Qué es ton·km/L?</b> Mide cuántas toneladas·kilómetro se transportan por cada litro de combustible.<br><b>Fórmula:</b> ton·km/L = Peso entregado (ton) × KM recorridos / Litros consumidos</div>""", unsafe_allow_html=True)
     df_op=df[df['KM']>0].copy(); df_op['MES_STR']=df_op['FECHA'].dt.to_period('M').astype(str)
     km_lts_mes=df_op.groupby(['DOMINIO','MES_STR']).agg(KM=('KM','sum'),LITROS=('LITROS','sum')).reset_index()
@@ -1057,7 +1037,7 @@ elif pg == "Datos Operativos":
         kpi2(t1,'','📊 Promedio ton·km/L',f'{tkml_prom:.2f}','toda la flota')
         kpi2(t2,'kpi-green',f'🏆 Mejor — {dom_max}',f'{tkml_max:.2f}','mayor productividad')
         kpi2(t3,'kpi-red',f'⚠️ Peor — {dom_min}',f'{tkml_min:.2f}','menor productividad')
-        kpi2(t4,'kpi-purple','📦 Período cubierto',f'{tonkml_mes["MES_STR"].nunique()} meses',f'{anio_sel}')
+        kpi2(t4,'kpi-purple','📦 Período cubierto',f'{tonkml_mes["MES_STR"].nunique()} meses',f'{_rango_txt}')
     fig_tkml=go.Figure()
     for i,dom in enumerate(tonkml_mes['DOMINIO'].unique()):
         sub=tonkml_mes[tonkml_mes['DOMINIO']==dom].sort_values('MES_STR')
@@ -1087,4 +1067,4 @@ elif pg == "Datos Operativos":
             yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8',size=10)),
             height=max(300,len(rank_tkml)*50+80),margin=dict(l=10,r=120,t=30,b=30),showlegend=False)
         st.plotly_chart(fig_rank, use_container_width=True)
-    st.caption(f'Fuente: reporte_hojas.xlsx (BI Expreso) · Telemetría Google Sheets · Año {anio_sel}')
+    st.caption(f'Fuente: reporte_hojas.xlsx (BI Expreso) · Telemetría Google Sheets · Período {_rango_txt}')
