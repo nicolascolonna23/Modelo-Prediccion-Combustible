@@ -254,6 +254,34 @@ def cargar_carga(tractores_validos=None):
     except Exception:
         return pd.DataFrame()
 @st.cache_data(ttl=3600)
+def cargar_viajes_todos():
+    """Carga todos los viajes finalizados del BI (con y sin peso) para calcular % de retornos vacíos."""
+    try:
+        import re
+        df = pd.read_excel(CARGA_URL)
+        df.columns = [str(c).strip() for c in df.columns]
+        col_unid   = next((c for c in df.columns if 'UNID'    in c.upper()), None)
+        col_peso   = next((c for c in df.columns if 'PESO'    in c.upper() and 'ENTREGAD' in c.upper()), None)
+        col_fecha  = next((c for c in df.columns if 'FECHA'   in c.upper()), None)
+        col_estado = next((c for c in df.columns if 'ESTADO'  in c.upper()), None)
+        if not all([col_unid, col_peso, col_fecha]):
+            return pd.DataFrame()
+        if col_estado:
+            df = df[df[col_estado].astype(str).str.upper() == 'FINALIZADA']
+        df[col_fecha] = pd.to_datetime(df[col_fecha], errors='coerce')
+        df[col_peso]  = pd.to_numeric(df[col_peso], errors='coerce').fillna(0)
+        df = df[df[col_fecha].notna()].copy()
+        def norm_pat(p):
+            return re.sub(r'\s+', '', str(p).strip().upper())
+        # Misma lógica que cargar_carga: primera patente = tractor
+        df['DOMINIO']   = df[col_unid].astype(str).str.split(',').str[0].apply(norm_pat)
+        df['MES']       = df[col_fecha].dt.to_period('M')
+        df['PESO_TON']  = df[col_peso] / 1000.0
+        df['CON_CARGA'] = (df['PESO_TON'] > 0).astype(int)
+        return df[['DOMINIO','MES','PESO_TON','CON_CARGA']].reset_index(drop=True)
+    except Exception:
+        return pd.DataFrame()
+@st.cache_data(ttl=3600)
 def obtener_precio_gasoil():
     try:
         import re
@@ -367,7 +395,13 @@ def calcular_ier(df, df_vel=None, df_carga=None):
         mask = agg['MODELO']==modelo
         idx  = agg.index[mask]
         if mask.sum()==0: continue
-        agg.loc[idx,'SCORE_CONSUMO'] = calcular_score_zscore(agg.loc[idx,'L100KM'], higher_is_better=False, k=0.4, min_sigma_pct=0.05).values
+        # SCORE_CONSUMO ahora se basa en ton·km/L (eficiencia productiva).
+        # Si no hay carga válida en el grupo, fallback a L/100km (consumo puro).
+        tkml_grp = agg.loc[idx,'TONKML']
+        if tiene_carga and tkml_grp.fillna(0).gt(0).sum() > 1:
+            agg.loc[idx,'SCORE_CONSUMO'] = calcular_score_zscore(tkml_grp.fillna(0), higher_is_better=True, k=0.4, min_sigma_pct=0.10).values
+        else:
+            agg.loc[idx,'SCORE_CONSUMO'] = calcular_score_zscore(agg.loc[idx,'L100KM'], higher_is_better=False, k=0.4, min_sigma_pct=0.05).values
         agg.loc[idx,'SCORE_KM'] = calcular_score_zscore(agg.loc[idx,'KM'], higher_is_better=True, k=0.4, min_sigma_pct=0.05).values
         # Excesos: SEVERIDAD = suma de km/h sobre el límite (frecuencia × magnitud combinadas)
         # Ej: 5 eventos a 95 km/h (sum=35) > 10 eventos a 89 km/h (sum=10) → 95 penaliza más
@@ -421,6 +455,7 @@ with st.spinner('Cargando telemetría, velocidades y datos de carga...'):
     # la patente correcta cuando UNIDADES del BI trae tractor+acoplado en la misma celda.
     tractores_flota = tuple(df_raw['DOMINIO'].dropna().unique()) if (df_raw is not None and not df_raw.empty and 'DOMINIO' in df_raw.columns) else ()
     df_carga_raw    = cargar_carga(tractores_flota)
+    df_viajes_raw   = cargar_viajes_todos()
 if df_raw.empty:
     st.warning('No se pudieron cargar datos.')
     st.stop()
@@ -562,12 +597,13 @@ if pg == "Dashboard Principal":
         render_ranking(rcol2,'TOP 10 menos eficientes (mayor L/100km)',base.sort_values('L100KM',ascending=False).head(10),
                        lambda i:'#ef4444' if i<=3 else ('#f59e0b' if i<=6 else '#22c55e'))
     st.divider()
-    st.markdown(f'<div class="sec-title">📊 Índice de Eficiencia Relativa (IER v4) — {anio_sel}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sec-title">📊 Índice de Eficiencia Relativa (IER v6) — {anio_sel}</div>', unsafe_allow_html=True)
     tiene_vel       = total_excesos>0
     tiene_carga_ier = (not df_ier.empty and 'PESO_TON' in df_ier.columns and df_ier['PESO_TON'].sum()>0)
+    consumo_label = "ton·km/L 📦" if tiene_carga_ier else "L/100km ⛽ (fallback)"
     pond_txt = (
-        f"<b>40%</b> L/100km &nbsp;·&nbsp; "
-        f"<b>40%</b> ton·km/L {'📦' if tiene_carga_ier else '⚠️ sin datos'} &nbsp;·&nbsp; "
+        f"<b>40%</b> Eficiencia productiva ({consumo_label}) &nbsp;·&nbsp; "
+        f"<b>40%</b> ton·km/L carga {'📦' if tiene_carga_ier else '⚠️ sin datos'} &nbsp;·&nbsp; "
         f"<b>10%</b> KM totales &nbsp;·&nbsp; "
         f"<b>10%</b> Severidad vel. {'✅' if tiene_vel else '⚠️'}"
     )
@@ -985,6 +1021,136 @@ elif pg == "Datos Operativos":
     kpi2(ck2,'','🚛 Patentes con Carga',f'{n_pat_con_carga}',f'de {df["DOMINIO"].nunique()} activas')
     kpi2(ck3,'kpi-green','📊 Prom. por Patente',f'{peso_prom_pat:,.1f}','toneladas período')
     kpi2(ck4,'kpi-amber','📅 Meses con datos',f'{meses_con_carga}',f'{_rango_txt}')
+    st.divider()
+    # ──────────────────────────────────────────────────────────────────────
+    #  MATRIZ L/100km vs kg/km — Diagnóstico de Carga
+    # ──────────────────────────────────────────────────────────────────────
+    st.markdown(f'<div class="sec-title">🔬 Diagnóstico de Carga — Matriz L/100km vs kg/km — {_rango_txt}</div>', unsafe_allow_html=True)
+    st.markdown("""<div class="ier-info-box">
+    <b>¿Cómo leer esta matriz?</b> Cada punto es una patente. Los ejes separan consumo (L/100km) y densidad de carga (kg transportados por km recorrido).<br>
+    La línea divisoria es la <b>mediana de la flota</b> en cada eje.<br>
+    <b>% viajes sin peso:</b> viajes finalizados en el BI con Peso Entregado = 0 — proxy de retornos vacíos.
+    </div>""", unsafe_allow_html=True)
+    _km_pat   = df[df['KM']>0].groupby('DOMINIO')['KM'].sum().reset_index()
+    _l100_pat = df[df['L100KM']>0].groupby('DOMINIO')['L100KM'].mean().reset_index()
+    _tons_pat = df_carga_anio.groupby('DOMINIO')['PESO_TON'].sum().reset_index()
+    _mat = _km_pat.merge(_l100_pat, on='DOMINIO').merge(_tons_pat, on='DOMINIO', how='inner')
+    _mat['KG_KM']  = (_mat['PESO_TON'] * 1000 / _mat['KM']).round(2)
+    _mat['MODELO'] = _mat['DOMINIO'].apply(asignar_modelo)
+    # Viajes vacíos
+    if df_viajes_raw is not None and not df_viajes_raw.empty:
+        if _desde is not None and _hasta is not None:
+            _vj = df_viajes_raw[(df_viajes_raw['MES']>=_desde)&(df_viajes_raw['MES']<=_hasta)&(df_viajes_raw['DOMINIO'].isin(_patentes_ld))]
+        else:
+            _vj = df_viajes_raw[(df_viajes_raw['MES'].apply(lambda p:p.year)==anio_sel)&(df_viajes_raw['DOMINIO'].isin(_patentes_ld))]
+        _vj_stats = _vj.groupby('DOMINIO').agg(N_TOTAL=('CON_CARGA','count'),N_CARGADOS=('CON_CARGA','sum')).reset_index()
+        _vj_stats['N_VACIOS']   = _vj_stats['N_TOTAL'] - _vj_stats['N_CARGADOS']
+        _vj_stats['PCT_VACIOS'] = (_vj_stats['N_VACIOS']/_vj_stats['N_TOTAL']*100).round(1)
+        _mat = _mat.merge(_vj_stats[['DOMINIO','N_TOTAL','N_CARGADOS','N_VACIOS','PCT_VACIOS']], on='DOMINIO', how='left')
+    else:
+        _mat['N_TOTAL']=0; _mat['N_CARGADOS']=0; _mat['N_VACIOS']=0; _mat['PCT_VACIOS']=0.0
+    if not _mat.empty and len(_mat)>=2:
+        _l100_med = _mat['L100KM'].median()
+        _kgkm_med = _mat['KG_KM'].median()
+        def _cuadrante(row):
+            bajo = row['L100KM'] <= _l100_med
+            alto = row['KG_KM']  >= _kgkm_med
+            if   bajo and alto:     return '🟢 Ideal','#22c55e','Eficiente y bien cargado.'
+            elif bajo and not alto: return '🟡 Subutilizado','#f59e0b','Consumo eficiente pero baja densidad de carga. Revisar rutas / retornos vacíos.'
+            elif not bajo and alto: return '🟠 Consumo alto','#f97316','Bien cargado pero consume en exceso. Revisar mecánica/conducción.'
+            else:                   return '🔴 Crítico','#ef4444','Consumo alto y baja carga. Intervención urgente.'
+        _mat[['CUAD_LABEL','CUAD_COLOR','CUAD_DESC']] = pd.DataFrame(_mat.apply(_cuadrante,axis=1).tolist(), index=_mat.index)
+        _x_min = _mat['L100KM'].min()*0.95; _x_max = _mat['L100KM'].max()*1.05
+        _y_min = _mat['KG_KM'].min()*0.90;  _y_max = _mat['KG_KM'].max()*1.10
+        fig_mat = go.Figure()
+        _quad_cfg = [
+            ([_x_min,_l100_med],[_kgkm_med,_y_max],'rgba(34,197,94,0.12)','#22c55e','🟢 IDEAL','Eficiente + bien cargado',_x_min,_y_max,'top left'),
+            ([_l100_med,_x_max],[_kgkm_med,_y_max],'rgba(249,115,22,0.12)','#f97316','🟠 CONSUMO ALTO','Carga OK · consumo excesivo',_x_max,_y_max,'top right'),
+            ([_x_min,_l100_med],[_y_min,_kgkm_med],'rgba(245,158,11,0.12)','#f59e0b','🟡 SUBUTILIZADO','Eficiente · poca carga',_x_min,_y_min,'bottom left'),
+            ([_l100_med,_x_max],[_y_min,_kgkm_med],'rgba(239,68,68,0.12)','#ef4444','🔴 CRÍTICO','Consumo alto + baja carga',_x_max,_y_min,'bottom right'),
+        ]
+        for _xr,_yr,_fc,_ec,_title,_sub,_ax,_ay,_apos in _quad_cfg:
+            fig_mat.add_shape(type='rect', x0=_xr[0], x1=_xr[1], y0=_yr[0], y1=_yr[1],
+                fillcolor=_fc, line=dict(color=_ec, width=0.5, dash='dot'), layer='below')
+            _xanchor='left' if 'left' in _apos else 'right'
+            _yanchor='top'  if 'top'  in _apos else 'bottom'
+            _pad_x=(_x_max-_x_min)*0.015*(1 if _xanchor=='left' else -1)
+            _pad_y=(_y_max-_y_min)*0.025*(-1 if _yanchor=='top' else 1)
+            fig_mat.add_annotation(x=_ax+_pad_x, y=_ay+_pad_y,
+                text=f'<b>{_title}</b><br><span style="font-size:9px;">{_sub}</span>',
+                showarrow=False, xanchor=_xanchor, yanchor=_yanchor,
+                font=dict(size=11, color=_ec), bgcolor='rgba(15,23,42,0.75)', borderpad=4)
+        fig_mat.add_vline(x=_l100_med, line_dash='dash', line_color='#64748b', line_width=1.5)
+        fig_mat.add_hline(y=_kgkm_med, line_dash='dash', line_color='#64748b', line_width=1.5)
+        fig_mat.add_annotation(x=_l100_med,y=_y_max,text=f'mediana L/100km = {_l100_med:.1f}',
+            showarrow=False, yanchor='bottom', font=dict(size=9,color='#64748b'),
+            bgcolor='rgba(15,23,42,0.7)', borderpad=3)
+        fig_mat.add_annotation(x=_x_min,y=_kgkm_med,text=f'mediana kg/km = {_kgkm_med:.0f}',
+            showarrow=False, xanchor='left', font=dict(size=9,color='#64748b'),
+            bgcolor='rgba(15,23,42,0.7)', borderpad=3)
+        fig_mat.add_trace(go.Scatter(
+            x=_mat['L100KM'], y=_mat['KG_KM'],
+            mode='markers+text',
+            text=_mat['DOMINIO'],
+            textposition='top center',
+            textfont=dict(size=10, color='#f1f5f9', family='monospace'),
+            marker=dict(size=18, color=_mat['CUAD_COLOR'], line=dict(color='white',width=2), symbol='circle'),
+            customdata=_mat[['CUAD_LABEL','CUAD_DESC','PCT_VACIOS','N_TOTAL','N_VACIOS','MODELO','KG_KM','PESO_TON']].values,
+            hovertemplate=(
+                '<b>%{text}</b>  <i>%{customdata[5]}</i><br>'
+                '─────────────────────<br>'
+                '⛽ L/100km: <b>%{x:.2f}</b>  (mediana flota: ' + f'{_l100_med:.1f})<br>' +
+                '📦 kg/km: <b>%{y:.1f}</b>  (mediana flota: ' + f'{_kgkm_med:.0f})<br>' +
+                '⚖️ Peso total: <b>%{customdata[7]:.1f} ton</b><br>'
+                '🚫 Viajes sin peso: <b>%{customdata[4]:.0f} / %{customdata[3]:.0f} (%{customdata[2]:.1f}%)</b><br>'
+                '─────────────────────<br>'
+                '<b>%{customdata[0]}</b><br>'
+                '<i>%{customdata[1]}</i><extra></extra>'
+            ),
+            showlegend=False
+        ))
+        fig_mat.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(30,41,59,0.6)', font=dict(color='#e2e8f0'),
+            xaxis=dict(gridcolor='#1e293b', tickfont=dict(color='#94a3b8',size=11),
+                title=dict(text='L / 100 km   —   litros consumidos por cada 100 km   (← menor = más eficiente)', font=dict(color='#94a3b8',size=11)),
+                range=[_x_min,_x_max]),
+            yaxis=dict(gridcolor='#1e293b', tickfont=dict(color='#94a3b8',size=11),
+                title=dict(text='kg / km   —   kg de carga entregados por km   (↑ mayor = más productivo)', font=dict(color='#94a3b8',size=11)),
+                range=[_y_min,_y_max]),
+            height=560, margin=dict(l=70,r=50,t=40,b=70))
+        st.plotly_chart(fig_mat, use_container_width=True)
+        st.caption('Cada punto = una patente · Líneas punteadas = mediana de la flota · Hover para diagnóstico completo')
+        # Tarjetas de diagnóstico individual
+        st.markdown('<div class="sec-title">📋 Diagnóstico Individual por Patente</div>', unsafe_allow_html=True)
+        _mat_sorted = _mat.sort_values('CUAD_COLOR', key=lambda s: s.map({'#ef4444':0,'#f97316':1,'#f59e0b':2,'#22c55e':3}))
+        _diag_cols = st.columns(min(4, len(_mat_sorted)))
+        for _i, (_, _r) in enumerate(_mat_sorted.iterrows()):
+            with _diag_cols[_i % len(_diag_cols)]:
+                _pct_v = _r.get('PCT_VACIOS', 0)
+                _n_tot = int(_r.get('N_TOTAL', 0))
+                _n_vac = int(_r.get('N_VACIOS', 0))
+                _vacios_txt = f"{_n_vac}/{_n_tot} viajes vacíos ({_pct_v:.0f}%)" if _n_tot>0 else "sin datos de viajes"
+                _bc = _r['CUAD_COLOR']
+                st.markdown(f"""
+                <div style="background:#1e293b;border-radius:12px;padding:16px;border-left:5px solid {_bc};margin-bottom:12px;">
+                  <div style="font-size:.95rem;font-weight:800;color:#f1f5f9;">{_r['DOMINIO']}</div>
+                  <div style="font-size:.72rem;color:#64748b;margin-bottom:8px;">{_r['MODELO']}</div>
+                  <div style="font-size:1.1rem;font-weight:700;color:{_bc};margin-bottom:6px;">{_r['CUAD_LABEL']}</div>
+                  <div style="font-size:.75rem;color:#94a3b8;line-height:1.5;">
+                    L/100km: <b style="color:#f1f5f9;">{_r['L100KM']:.2f}</b><br>
+                    kg/km: <b style="color:#f1f5f9;">{_r['KG_KM']:.1f}</b><br>
+                    Viajes sin peso: <b style="color:#fbbf24;">{_vacios_txt}</b>
+                  </div>
+                  <div style="font-size:.72rem;color:#94a3b8;margin-top:8px;font-style:italic;">{_r['CUAD_DESC']}</div>
+                </div>""", unsafe_allow_html=True)
+        with st.expander('📋 Ver tabla completa diagnóstico'):
+            _tbl = _mat[['DOMINIO','MODELO','L100KM','KG_KM','PESO_TON','N_TOTAL','N_CARGADOS','N_VACIOS','PCT_VACIOS','CUAD_LABEL']].copy()
+            _tbl.columns = ['Patente','Modelo','L/100km','kg/km','Peso total (ton)','Viajes total','Con carga','Sin carga','% sin carga','Cuadrante']
+            _tbl['L/100km']=_tbl['L/100km'].round(2)
+            _tbl['kg/km']=_tbl['kg/km'].round(1)
+            _tbl['Peso total (ton)']=_tbl['Peso total (ton)'].round(1)
+            st.dataframe(_tbl.sort_values('% sin carga', ascending=False), use_container_width=True, hide_index=True)
+    else:
+        st.info('Sin datos suficientes para armar la matriz (se necesitan telemetría + carga simultáneas).')
     st.divider()
     st.markdown(f'<div class="sec-title">📦 Peso Entregado por Mes y Patente (toneladas) — {_rango_txt}</div>', unsafe_allow_html=True)
     pivot_carga=(df_carga_anio.pivot_table(index='DOMINIO',columns='MES_STR',values='PESO_TON',aggfunc='sum',fill_value=0).reset_index())
