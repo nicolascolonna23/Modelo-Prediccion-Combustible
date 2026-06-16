@@ -124,7 +124,7 @@ section[data-testid="stMain"] { background: #0f172a; }
 """
 pg = st.sidebar.radio(
     "Navegacion",
-    ["Dashboard Principal", "Modelo Predictivo", "Análisis por Patente", "Datos Operativos"],
+    ["Dashboard Principal", "Modelo Predictivo", "Análisis por Patente", "Datos Operativos", "🔧 Diagnóstico"],
     index=0,
     label_visibility="collapsed"
 )
@@ -969,33 +969,22 @@ elif pg == "Datos Operativos":
         st.stop()
     # Solo patentes LAD (las mismas del df de telemetría)
     _patentes_ld = df['DOMINIO'].dropna().unique()
-    # ── FILTRO DE FECHA PROPIO DE LA PESTAÑA ──────────────────────────────
-    _periodos_carga = sorted(df_carga_raw['MES'].dropna().unique().tolist())
-    _periodos_str   = [str(p) for p in _periodos_carga]
-    if _periodos_str:
-        _default_desde = st.session_state.get('desde_periodo', None)
-        _default_hasta = st.session_state.get('hasta_periodo', None)
-        _idx_desde = _periodos_str.index(str(_default_desde)) if _default_desde is not None and str(_default_desde) in _periodos_str else 0
-        _idx_hasta = _periodos_str.index(str(_default_hasta)) if _default_hasta is not None and str(_default_hasta) in _periodos_str else len(_periodos_str)-1
-        st.markdown(f'<div class="sec-title">📅 Filtro de período</div>', unsafe_allow_html=True)
-        _fc1, _fc2 = st.columns(2)
-        with _fc1:
-            _sel_desde = st.selectbox('Desde (mes/año)', options=_periodos_str, index=_idx_desde, key='do_desde')
-        with _fc2:
-            _sel_hasta = st.selectbox('Hasta (mes/año)', options=_periodos_str, index=_idx_hasta, key='do_hasta')
-        _desde = pd.Period(_sel_desde, 'M')
-        _hasta = pd.Period(_sel_hasta, 'M')
-        if _desde > _hasta:
-            st.warning('⚠️ "Desde" es posterior a "Hasta". Invertí el rango.'); st.stop()
+    # Filtro temporal: usa Desde/Hasta del sidebar
+    _desde = st.session_state.get('desde_periodo', None)
+    _hasta = st.session_state.get('hasta_periodo', None)
+    if _desde is not None and _hasta is not None:
         df_carga_anio = df_carga_raw[
             (df_carga_raw['MES'] >= _desde) &
             (df_carga_raw['MES'] <= _hasta) &
             (df_carga_raw['DOMINIO'].isin(_patentes_ld))
-        ].copy()
+        ].copy() if not df_carga_raw.empty else pd.DataFrame()
         _rango_txt = f'{_desde} a {_hasta}' if _desde != _hasta else f'{_desde}'
     else:
-        df_carga_anio = pd.DataFrame()
-        _rango_txt    = f'{anio_sel}'
+        df_carga_anio = df_carga_raw[
+            (df_carga_raw['MES'].apply(lambda p:p.year)==anio_sel) &
+            (df_carga_raw['DOMINIO'].isin(_patentes_ld))
+        ].copy() if not df_carga_raw.empty else pd.DataFrame()
+        _rango_txt = f'{anio_sel}'
     if df_carga_anio.empty: st.warning(f'Sin datos de carga para {_rango_txt}.'); st.stop()
     df_carga_anio['MES_STR']=df_carga_anio['MES'].astype(str)
     df_carga_anio['MODELO']=df_carga_anio['DOMINIO'].apply(asignar_modelo)
@@ -1035,6 +1024,10 @@ elif pg == "Datos Operativos":
         _vj_stats['N_VACIOS']   = _vj_stats['N_TOTAL'] - _vj_stats['N_CARGADOS']
         _vj_stats['PCT_VACIOS'] = (_vj_stats['N_VACIOS']/_vj_stats['N_TOTAL']*100).round(1)
         _mat = _mat.merge(_vj_stats[['DOMINIO','N_TOTAL','N_CARGADOS','N_VACIOS','PCT_VACIOS']], on='DOMINIO', how='left')
+        for _c in ['N_TOTAL','N_CARGADOS','N_VACIOS','PCT_VACIOS']:
+            _mat[_c] = pd.to_numeric(_mat[_c], errors='coerce').fillna(0)
+        for _c in ['N_TOTAL','N_CARGADOS','N_VACIOS']:
+            _mat[_c] = _mat[_c].astype(int)
     else:
         _mat['N_TOTAL']=0; _mat['N_CARGADOS']=0; _mat['N_VACIOS']=0; _mat['PCT_VACIOS']=0.0
     if not _mat.empty and len(_mat)>=2:
@@ -1222,3 +1215,54 @@ elif pg == "Datos Operativos":
             height=max(300,len(rank_tkml)*50+80),margin=dict(l=10,r=120,t=30,b=30),showlegend=False)
         st.plotly_chart(fig_rank, use_container_width=True)
     st.caption(f'Fuente: reporte_hojas.xlsx (BI Expreso) · Telemetría Google Sheets · Período {_rango_txt}')
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PESTAÑA — DIAGNÓSTICO
+# ═══════════════════════════════════════════════════════════════════════════════
+elif pg == "🔧 Diagnóstico":
+    col_logo5, col_title5 = st.columns([1,5])
+    with col_logo5: st.image(LOGO_URL, width=130)
+    with col_title5:
+        st.markdown(f"""<div style='padding:8px 0;'>
+        <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>🔧 Diagnóstico de Fuentes</div>
+        <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Estado de cada fuente de datos · {pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")}</div>
+        </div>""", unsafe_allow_html=True)
+    st.divider()
+    def _diag_card(titulo, ok, detalle, sub=''):
+        color = '#22c55e' if ok else '#ef4444'
+        icon  = '✅' if ok else '❌'
+        st.markdown(f"""
+        <div style="background:#1e293b;border-radius:12px;padding:14px 18px;border-left:5px solid {color};margin:8px 0;">
+          <div style="font-size:1rem;font-weight:700;color:#f1f5f9;">{icon} {titulo}</div>
+          <div style="font-size:.85rem;color:#e2e8f0;margin-top:4px;">{detalle}</div>
+          <div style="font-size:.75rem;color:#94a3b8;margin-top:2px;font-family:monospace;">{sub}</div>
+        </div>""", unsafe_allow_html=True)
+    st.markdown('## 📡 Telemetría')
+    _ok_tel = not df_raw.empty
+    _det_tel = f'{len(df_raw):,} filas · {df_raw["DOMINIO"].nunique() if _ok_tel else 0} patentes · {df_raw["FECHA"].min()} → {df_raw["FECHA"].max()}' if _ok_tel else 'Sin datos cargados'
+    _diag_card('Telemetría LAD', _ok_tel, _det_tel, f'Fuente: {URL_TEL}')
+    st.markdown('## 🚦 Velocidades')
+    _ok_vel = not df_vel_raw.empty
+    _det_vel = f'{len(df_vel_raw):,} eventos >{LIMITE_VELOCIDAD} km/h · {df_vel_raw["DOMINIO"].nunique() if _ok_vel else 0} patentes con excesos' if _ok_vel else 'Sin eventos de velocidad'
+    _diag_card('Excesos de velocidad', _ok_vel, _det_vel, f'Fuente: {URL_VEL}')
+    st.markdown('## 📦 Carga (BI)')
+    _ok_car = not df_carga_raw.empty
+    _det_car = f'{len(df_carga_raw):,} registros mensuales · {df_carga_raw["DOMINIO"].nunique() if _ok_car else 0} patentes con carga · {df_carga_raw["PESO_TON"].sum():,.1f} ton totales' if _ok_car else 'Sin datos de carga del BI'
+    _diag_card('Peso entregado', _ok_car, _det_car, f'Fuente: {CARGA_URL}')
+    st.markdown('## 🚛 Viajes')
+    _ok_vj = not df_viajes_raw.empty
+    _det_vj = f'{len(df_viajes_raw):,} viajes · {df_viajes_raw["DOMINIO"].nunique() if _ok_vj else 0} patentes' if _ok_vj else 'Sin datos de viajes'
+    _diag_card('Viajes totales (con y sin carga)', _ok_vj, _det_vj, f'Fuente: {CARGA_URL}')
+    st.markdown('## ⛽ Precio combustible')
+    _diag_card('Precio gasoil', True, f'${precio_gasoil:,.0f} / L', f'Fuente: {precio_fuente}')
+    st.divider()
+    st.markdown('### 📋 Muestra de telemetría')
+    if not df_raw.empty:
+        st.dataframe(df_raw.head(15), use_container_width=True, hide_index=True)
+    st.markdown('### 📋 Muestra de carga')
+    if not df_carga_raw.empty:
+        st.dataframe(df_carga_raw.head(15), use_container_width=True, hide_index=True)
+    st.markdown('### 📋 Muestra de viajes')
+    if not df_viajes_raw.empty:
+        st.dataframe(df_viajes_raw.head(15), use_container_width=True, hide_index=True)
+
