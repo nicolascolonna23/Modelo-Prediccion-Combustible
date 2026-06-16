@@ -669,7 +669,15 @@ if pg == "Dashboard Principal":
             elif v>=95: return '#f59e0b'
             elif v>=85: return '#f97316'
             else: return '#ef4444'
-        df_ier_sorted = df_ier.sort_values(['MODELO','IER'],ascending=[True,False])
+        orden_ier = st.radio(
+            'Orden del ranking IER',
+            options=['🏆 Flota completa (mayor → menor)', '🚛 Agrupado por modelo'],
+            index=0, horizontal=True, key='ier_sort_mode'
+        )
+        if orden_ier.startswith('🏆'):
+            df_ier_sorted = df_ier.sort_values('IER', ascending=True)  # ascending para que el más alto quede arriba en plot horizontal
+        else:
+            df_ier_sorted = df_ier.sort_values(['MODELO','IER'],ascending=[True,False])
         fig_ier=go.Figure()
         MODELO_COLOR={'S-Way':'#60a5fa','Scania':'#f97316','Stralis':'#a78bfa'}
         for modelo in MODELO_COLOR:
