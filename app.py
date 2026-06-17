@@ -427,11 +427,14 @@ def cargar_gasto_combustible():
             'MONTO': col_monto.apply(parse_monto),
         })
         sub = sub[(sub['TIPO']==GASTO_COMB_TIPO.upper()) & sub['FECHA'].notna() & sub['MONTO'].notna() & (sub['MONTO']>0)]
+        # Descartar fechas futuras (typos) y quedarnos con el mes más cercano a hoy
+        hoy = pd.Timestamp.now().normalize()
+        sub = sub[sub['FECHA'] <= hoy]
         if sub.empty:
-            diag['err'] = f'Sin filas tipo "{GASTO_COMB_TIPO}" con fecha y monto válidos.'
+            diag['err'] = f'Sin filas tipo "{GASTO_COMB_TIPO}" con fecha (≤ hoy) y monto válidos.'
             return np.nan, None, 0, diag
         sub['MES'] = sub['FECHA'].dt.to_period('M')
-        mes_max = sub['MES'].max()
+        mes_max = sub['MES'].max()          # mes más reciente (más cercano a hoy)
         sub_mes = sub[sub['MES']==mes_max]
         gasto_prom = float(sub_mes['MONTO'].mean())
         diag['mes'] = str(mes_max); diag['n_mes'] = int(len(sub_mes)); diag['err'] = 'OK'
@@ -593,7 +596,13 @@ with st.spinner('Cargando telemetría, velocidades y datos de carga...'):
 if df_raw.empty:
     st.warning('No se pudieron cargar datos.')
     st.stop()
-precio_gasoil, precio_fuente = obtener_precio_gasoil()
+# Precio gasoil = monto estimado X10 del mes más cercano a hoy (planilla de gastos).
+# Si la planilla no está disponible, cae al valor base manual.
+if not (gasto_comb_prom is None or (isinstance(gasto_comb_prom, float) and np.isnan(gasto_comb_prom))):
+    precio_gasoil = float(gasto_comb_prom)
+    precio_fuente = f"X10 {gasto_comb_mes} (planilla gastos)"
+else:
+    precio_gasoil, precio_fuente = obtener_precio_gasoil()
 st.markdown(DARK_CSS, unsafe_allow_html=True)
 if 'DOMINIO' in df_raw.columns:
     df_raw['MODELO'] = df_raw['DOMINIO'].apply(asignar_modelo)
@@ -691,15 +700,10 @@ if pg == "Dashboard Principal":
     kpi(k1,'','⛽ Litros totales',f'{lts_total:,.0f}',f'litros {anio_sel}')
     kpi(k2,'','🛣️ KM recorridos',f'{kms_total:,.0f}',f'kilómetros {anio_sel}')
     kpi(k3,delta_col,'📊 L/100km flota',f'{l100_prom:.2f}',delta_txt)
-    k4,k5,k6,k7 = st.columns(4)
+    k4,k5,k6 = st.columns(3)
     kpi(k4,'kpi-amber','💰 Costo estimado',f'${costo_est/1e6:.1f}M',f'@ ${precio_gasoil:,.0f}/L')
     kpi(k5,'kpi-green','🚛 Unidades activas',f'{n_unidades}','dominios únicos')
     kpi(k6,'kpi-purple','🛣️ KM/día flota',f'{km_dia_flota:,.0f}',f'{dias_periodo} días de período' if dias_periodo>0 else 'sin fechas')
-    if not (gasto_comb_prom is None or (isinstance(gasto_comb_prom,float) and np.isnan(gasto_comb_prom))):
-        kpi(k7,'kpi-amber','⛽ Gasto combustible actual',f'${gasto_comb_prom:,.0f}',
-            f'prom. tipo {GASTO_COMB_TIPO} · {gasto_comb_mes} · {gasto_comb_n} cargas')
-    else:
-        kpi(k7,'','⛽ Gasto combustible actual','—','sin datos · ver Diagnóstico')
     st.divider()
     st.markdown(f'<div class="sec-title">Rendimiento por Modelo — {anio_sel}</div>', unsafe_allow_html=True)
     def stats_modelo(patentes_lista):
@@ -1613,13 +1617,13 @@ elif pg == "🔧 Diagnóstico":
         Columnas detectadas → patente: <code>{arreglos_diag.get('col_dom')}</code> · fecha: <code>{arreglos_diag.get('col_fecha')}</code> · monto: <code>{arreglos_diag.get('col_monto')}</code><br>
         Columnas en hoja: {arreglos_diag.get('cols')}
         </div>""", unsafe_allow_html=True)
-    st.markdown('## ⛽ Gasto combustible actual')
+    st.markdown('## ⛽ Precio gasoil (X10 — fuente del precio)')
     _ok_gc = not (gasto_comb_prom is None or (isinstance(gasto_comb_prom,float) and np.isnan(gasto_comb_prom)))
     if _ok_gc:
-        _det_gc = f'${gasto_comb_prom:,.0f} promedio · mes {gasto_comb_mes} · {gasto_comb_n} cargas tipo {GASTO_COMB_TIPO}'
+        _det_gc = f'${gasto_comb_prom:,.0f} = monto estimado X10 promedio del mes {gasto_comb_mes} ({gasto_comb_n} cargas) → usado como precio gasoil'
     else:
-        _det_gc = f'Sin datos. {gasto_comb_diag.get("err","")}'
-    _diag_card('Gasto combustible actual (col I, filtro col F = X10)', _ok_gc, _det_gc, f'Sheet: {GASTO_COMB_SHEET_ID} · gid={GASTO_COMB_GID}')
+        _det_gc = f'Sin datos X10 → cae a valor base manual $2.300. {gasto_comb_diag.get("err","")}'
+    _diag_card('Precio gasoil desde X10 (col I, filtro col F = X10, mes más cercano a hoy)', _ok_gc, _det_gc, f'Sheet: {GASTO_COMB_SHEET_ID} · gid={GASTO_COMB_GID}')
     if isinstance(gasto_comb_diag, dict):
         st.markdown(f"""
         <div style="background:#0f172a;border:1px solid #334155;border-radius:6px;padding:6px 10px;margin:3px 0;font-size:.78rem;font-family:monospace;color:#e2e8f0;">
