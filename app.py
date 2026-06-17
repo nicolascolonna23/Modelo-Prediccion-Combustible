@@ -40,6 +40,10 @@ MANEJO_SHEETS   = [
 # ── DATOS ARREGLOS / REPARACIONES (Gasto por patente) ──────────────────────
 ARREGLOS_SHEET_ID = "1u7cckay0IJ60bfoKk2OZo-TjCvTbH9O1wKxNFdSKDCQ"
 ARREGLOS_GID      = "33208473"
+# ── GASTO COMBUSTIBLE ACTUAL (misma planilla, otra hoja) ──────────────────
+GASTO_COMB_SHEET_ID = "1u7cckay0IJ60bfoKk2OZo-TjCvTbH9O1wKxNFdSKDCQ"
+GASTO_COMB_GID      = "1071419143"
+GASTO_COMB_TIPO     = "X10"   # filtro columna F (c tipo)
 DARK_CSS = """
 <style>
 [data-testid="stAppViewContainer"] { background: #0f172a; }
@@ -384,6 +388,57 @@ def cargar_arreglos():
     except Exception as e:
         diag['err'] = str(e)[:160]
         return pd.DataFrame(), diag
+@st.cache_data(ttl=600)
+def cargar_gasto_combustible():
+    """Lee la planilla de gastos: filtra col F (c tipo) == X10, agarra el mes
+    más reciente según col A (fecha) y promedia col I (monto estimado).
+    Devuelve (gasto_prom, mes_str, n_filas, diag)."""
+    from io import StringIO
+    diag = {'status':'?', 'rows':0, 'cols':[], 'mes':None, 'n_mes':0, 'tipo_filter':GASTO_COMB_TIPO, 'err':''}
+    try:
+        url = f"https://docs.google.com/spreadsheets/d/{GASTO_COMB_SHEET_ID}/gviz/tq?tqx=out:csv&gid={GASTO_COMB_GID}"
+        r = requests.get(url, timeout=20)
+        diag['status'] = r.status_code
+        if r.status_code != 200:
+            diag['err'] = f'HTTP {r.status_code}'
+            return np.nan, None, 0, diag
+        df = pd.read_csv(StringIO(r.text), header=0)
+        diag['cols'] = list(df.columns)
+        diag['rows'] = len(df)
+        if df.shape[1] < 9:
+            diag['err'] = f'La hoja tiene solo {df.shape[1]} columnas (se esperan al menos 9 hasta I).'
+            return np.nan, None, 0, diag
+        # Acceso posicional: A=0 (fecha), F=5 (c tipo), I=8 (monto estimado)
+        col_fecha = df.iloc[:, 0]
+        col_tipo  = df.iloc[:, 5]
+        col_monto = df.iloc[:, 8]
+        # Parseo monto formato AR ("$1.234,56" / "1234,56" / "1234.56")
+        def parse_monto(s):
+            s = str(s).strip()
+            if not s or s.lower() == 'nan': return np.nan
+            import re
+            s = re.sub(r'[^\d,.\-]', '', s)
+            if ',' in s and '.' in s: s = s.replace('.', '').replace(',', '.')
+            elif ',' in s:            s = s.replace(',', '.')
+            return pd.to_numeric(s, errors='coerce')
+        sub = pd.DataFrame({
+            'FECHA': pd.to_datetime(col_fecha, errors='coerce', dayfirst=True),
+            'TIPO' : col_tipo.astype(str).str.strip().str.upper(),
+            'MONTO': col_monto.apply(parse_monto),
+        })
+        sub = sub[(sub['TIPO']==GASTO_COMB_TIPO.upper()) & sub['FECHA'].notna() & sub['MONTO'].notna() & (sub['MONTO']>0)]
+        if sub.empty:
+            diag['err'] = f'Sin filas tipo "{GASTO_COMB_TIPO}" con fecha y monto válidos.'
+            return np.nan, None, 0, diag
+        sub['MES'] = sub['FECHA'].dt.to_period('M')
+        mes_max = sub['MES'].max()
+        sub_mes = sub[sub['MES']==mes_max]
+        gasto_prom = float(sub_mes['MONTO'].mean())
+        diag['mes'] = str(mes_max); diag['n_mes'] = int(len(sub_mes)); diag['err'] = 'OK'
+        return gasto_prom, str(mes_max), int(len(sub_mes)), diag
+    except Exception as e:
+        diag['err'] = str(e)[:160]
+        return np.nan, None, 0, diag
 def asignar_modelo(dominio):
     d = str(dominio).strip().upper()
     if d in SWAY_PATENTES:   return 'S-Way'
@@ -534,6 +589,7 @@ with st.spinner('Cargando telemetría, velocidades y datos de carga...'):
     df_viajes_raw   = cargar_viajes_todos()
     df_manejo_raw, manejo_diag = cargar_datos_manejo()
     df_arreglos_raw, arreglos_diag = cargar_arreglos()
+    gasto_comb_prom, gasto_comb_mes, gasto_comb_n, gasto_comb_diag = cargar_gasto_combustible()
 if df_raw.empty:
     st.warning('No se pudieron cargar datos.')
     st.stop()
@@ -635,10 +691,15 @@ if pg == "Dashboard Principal":
     kpi(k1,'','⛽ Litros totales',f'{lts_total:,.0f}',f'litros {anio_sel}')
     kpi(k2,'','🛣️ KM recorridos',f'{kms_total:,.0f}',f'kilómetros {anio_sel}')
     kpi(k3,delta_col,'📊 L/100km flota',f'{l100_prom:.2f}',delta_txt)
-    k4,k5,k6 = st.columns(3)
+    k4,k5,k6,k7 = st.columns(4)
     kpi(k4,'kpi-amber','💰 Costo estimado',f'${costo_est/1e6:.1f}M',f'@ ${precio_gasoil:,.0f}/L')
     kpi(k5,'kpi-green','🚛 Unidades activas',f'{n_unidades}','dominios únicos')
     kpi(k6,'kpi-purple','🛣️ KM/día flota',f'{km_dia_flota:,.0f}',f'{dias_periodo} días de período' if dias_periodo>0 else 'sin fechas')
+    if not (gasto_comb_prom is None or (isinstance(gasto_comb_prom,float) and np.isnan(gasto_comb_prom))):
+        kpi(k7,'kpi-amber','⛽ Gasto combustible actual',f'${gasto_comb_prom:,.0f}',
+            f'prom. tipo {GASTO_COMB_TIPO} · {gasto_comb_mes} · {gasto_comb_n} cargas')
+    else:
+        kpi(k7,'','⛽ Gasto combustible actual','—','sin datos · ver Diagnóstico')
     st.divider()
     st.markdown(f'<div class="sec-title">Rendimiento por Modelo — {anio_sel}</div>', unsafe_allow_html=True)
     def stats_modelo(patentes_lista):
@@ -929,17 +990,18 @@ elif pg == "Modelo Predictivo":
         Xf=poly.transform(t_fut)
         pred_l100=np.clip(model_l100.predict(Xf),0,100); pred_lts=np.clip(model_lts.predict(Xf),0,None)
         meses_fut=[(ultimo+i+1).strftime('%b %Y') for i in range(n_pred)]
-        st.info(f'📐 Grado polinomial: {degree} | R² = {r2_l100:.3f} | σ residuos = {std_res:.2f} L/100km')
         st.markdown(f'<div class="sec-title">Predicción meses restantes {ultimo.year} ({n_pred} meses)</div>', unsafe_allow_html=True)
-        n_kpi=min(4,n_pred); kpi_cols=st.columns(n_kpi)
-        for c,mes,l100_p,lts_p in zip(kpi_cols,meses_fut[:n_kpi],pred_l100[:n_kpi],pred_lts[:n_kpi]):
-            costo_p=lts_p*precio_gasoil
-            c.metric(label=f'Predicción {mes}',value=f'{l100_p:.2f} L/100km',delta=f'{lts_p:,.0f} L | ${costo_p/1e6:.2f}M')
-        if n_pred>4:
-            kpi_cols2=st.columns(min(4,n_pred-4))
-            for c,mes,l100_p,lts_p in zip(kpi_cols2,meses_fut[4:],pred_l100[4:],pred_lts[4:]):
-                costo_p=lts_p*precio_gasoil
-                c.metric(label=f'Predicción {mes}',value=f'{l100_p:.2f} L/100km',delta=f'{lts_p:,.0f} L | ${costo_p/1e6:.2f}M')
+        def _pred_card(c, mes, l100_p, lts_p, costo_p):
+            c.markdown(f'''<div class="kpi-card kpi-purple" style="padding:16px 18px;">
+              <div class="kpi-label">Predicción {mes}</div>
+              <div style="font-size:1.55rem;font-weight:800;color:#f1f5f9;line-height:1.15;margin-top:2px;">{l100_p:.2f} <span style="font-size:.85rem;color:#94a3b8;font-weight:600;">L/100km</span></div>
+              <div style="font-size:.78rem;color:#64748b;margin-top:6px;">{lts_p:,.0f} L · ${costo_p/1e6:.2f}M</div>
+            </div>''', unsafe_allow_html=True)
+        for _row_start in range(0, n_pred, 4):
+            _cols = st.columns(4)
+            for _c, _idx in zip(_cols, range(_row_start, min(_row_start+4, n_pred))):
+                _mes=meses_fut[_idx]; _l100p=pred_l100[_idx]; _ltsp=pred_lts[_idx]
+                _pred_card(_c, _mes, _l100p, _ltsp, _ltsp*precio_gasoil)
         st.divider()
         st.markdown(f'<div class="sec-title">🎯 Consumo Esperado Próximo Mes — {meses_fut[0]}</div>', unsafe_allow_html=True)
         _next_l100=float(pred_l100[0]); _next_lts=float(pred_lts[0]); _next_costo=_next_lts*precio_gasoil
@@ -1006,9 +1068,16 @@ elif pg == "Modelo Predictivo":
         st.caption(f'±1.5σ intervalo de confianza | Línea roja = histórico ({n_meses_entrenamiento} meses) | Línea azul = predicción')
         st.divider()
         st.markdown('<div class="sec-title">🚨 Alerta de Desvío — Predicción vs. Real</div>', unsafe_allow_html=True)
-        if len(hist)>=3:
-            ultimo_real_mes=str(hist['MES_PERIODO'].iloc[-1]); ultimo_real_l100=float(hist['L100'].iloc[-1])
-            hist_prev=hist.iloc[:-1].copy(); hist_prev['T']=range(len(hist_prev))
+        # Usa el último mes del rango filtrado del sidebar (meses_df) como mes a evaluar.
+        # Re-entrena el polinomio con TODO lo histórico anterior a ese mes para predecirlo.
+        mes_eval = (meses_df['MES_PERIODO'].iloc[-1] if not meses_df.empty
+                    else hist['MES_PERIODO'].iloc[-1])
+        real_l100_eval = (float(meses_df['L100'].iloc[-1]) if not meses_df.empty
+                          else float(hist['L100'].iloc[-1]))
+        hist_prev = meses_hist_full[meses_hist_full['MES_PERIODO']<mes_eval].copy()
+        hist_prev['T']=range(len(hist_prev))
+        if len(hist_prev)>=3:
+            ultimo_real_mes=str(mes_eval); ultimo_real_l100=real_l100_eval
             degree_prev=min(2,len(hist_prev)-1)
             poly_prev=PolynomialFeatures(degree=degree_prev); Xprev=poly_prev.fit_transform(hist_prev['T'].values.reshape(-1,1))
             m_prev=LinearRegression().fit(Xprev,hist_prev['L100'].values)
@@ -1021,6 +1090,8 @@ elif pg == "Modelo Predictivo":
                 st.markdown(f'<div class="alert-box"><b>🚨 DESVÍO DETECTADO — {ultimo_real_mes}</b><br>Consumo real: <b>{ultimo_real_l100:.2f} L/100km</b> &nbsp;|&nbsp; Predicción: <b>{pred_ultimo:.2f} L/100km</b><br>Desvío: <b>{desvio:+.2f} L/100km ({desvio_pct:+.1f}%)</b> — {dir_txt} al intervalo esperado (±{umbral:.2f})</div>', unsafe_allow_html=True)
             else:
                 st.markdown(f'<div class="alert-ok"><b>✅ Sin desvío — {ultimo_real_mes}</b><br>Consumo real: <b>{ultimo_real_l100:.2f} L/100km</b> &nbsp;|&nbsp; Predicción: <b>{pred_ultimo:.2f} L/100km</b><br>Desvío: <b>{desvio:+.2f} L/100km ({desvio_pct:+.1f}%)</b> — dentro del intervalo esperado (±{umbral:.2f})</div>', unsafe_allow_html=True)
+        else:
+            st.info(f'No hay suficiente historial previo a {mes_eval} para evaluar el desvío (se necesitan ≥3 meses anteriores).')
         st.divider()
         st.markdown('<div class="sec-title">🎨 Simulador What-If</div>', unsafe_allow_html=True)
         delta_precio_pct=st.slider('💸 Variación precio combustible (%)',min_value=-30,max_value=50,value=0,step=1)
@@ -1244,7 +1315,7 @@ elif pg == "Datos Operativos":
     peso_total=df_carga_anio['PESO_TON'].sum(); n_pat_con_carga=df_carga_anio['DOMINIO'].nunique()
     peso_prom_pat=peso_total/n_pat_con_carga if n_pat_con_carga>0 else 0; meses_con_carga=df_carga_anio['MES'].nunique()
     def kpi2(cont,color,label,value,sub=''):
-        cont.markdown(f'<div class="kpi-card {color}"><div class="kpi-label">{label}</div><div class="kpi-value">{value}</div><div class="kpi-sub">{sub}</div></div>', unsafe_allow_html=True)
+        cont.markdown(f'<div class="kpi-card {color}" style="padding:14px 16px;"><div class="kpi-label" style="font-size:.7rem;">{label}</div><div class="kpi-value" style="font-size:1.45rem;">{value}</div><div class="kpi-sub" style="font-size:.7rem;">{sub}</div></div>', unsafe_allow_html=True)
     # % retornos vacíos (viajes finalizados con Peso Entregado = 0)
     if df_viajes_raw is not None and not df_viajes_raw.empty:
         if _desde is not None and _hasta is not None:
@@ -1541,6 +1612,19 @@ elif pg == "🔧 Diagnóstico":
         <div style="background:#0f172a;border:1px solid #334155;border-radius:6px;padding:6px 10px;margin:3px 0;font-size:.78rem;font-family:monospace;color:#e2e8f0;">
         Columnas detectadas → patente: <code>{arreglos_diag.get('col_dom')}</code> · fecha: <code>{arreglos_diag.get('col_fecha')}</code> · monto: <code>{arreglos_diag.get('col_monto')}</code><br>
         Columnas en hoja: {arreglos_diag.get('cols')}
+        </div>""", unsafe_allow_html=True)
+    st.markdown('## ⛽ Gasto combustible actual')
+    _ok_gc = not (gasto_comb_prom is None or (isinstance(gasto_comb_prom,float) and np.isnan(gasto_comb_prom)))
+    if _ok_gc:
+        _det_gc = f'${gasto_comb_prom:,.0f} promedio · mes {gasto_comb_mes} · {gasto_comb_n} cargas tipo {GASTO_COMB_TIPO}'
+    else:
+        _det_gc = f'Sin datos. {gasto_comb_diag.get("err","")}'
+    _diag_card('Gasto combustible actual (col I, filtro col F = X10)', _ok_gc, _det_gc, f'Sheet: {GASTO_COMB_SHEET_ID} · gid={GASTO_COMB_GID}')
+    if isinstance(gasto_comb_diag, dict):
+        st.markdown(f"""
+        <div style="background:#0f172a;border:1px solid #334155;border-radius:6px;padding:6px 10px;margin:3px 0;font-size:.78rem;font-family:monospace;color:#e2e8f0;">
+        Filas totales hoja: {gasto_comb_diag.get('rows')} · Filtro tipo: <code>{gasto_comb_diag.get('tipo_filter')}</code> · Mes detectado: <code>{gasto_comb_diag.get('mes')}</code> · Filas del mes: {gasto_comb_diag.get('n_mes')}<br>
+        Columnas hoja: {gasto_comb_diag.get('cols')}
         </div>""", unsafe_allow_html=True)
     st.markdown('## ⛽ Precio combustible')
     _diag_card('Precio gasoil', True, f'${precio_gasoil:,.0f} / L', f'Fuente: {precio_fuente}')
