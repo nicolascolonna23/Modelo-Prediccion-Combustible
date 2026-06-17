@@ -37,6 +37,9 @@ MANEJO_SHEETS   = [
     {"gid": "738544003",  "modelo": "S-Way"},
     {"gid": "2022308308", "modelo": "Scania"},
 ]
+# ── DATOS ARREGLOS / REPARACIONES (Gasto por patente) ──────────────────────
+ARREGLOS_SHEET_ID = "1u7cckay0IJ60bfoKk2OZo-TjCvTbH9O1wKxNFdSKDCQ"
+ARREGLOS_GID      = "33208473"
 DARK_CSS = """
 <style>
 [data-testid="stAppViewContainer"] { background: #0f172a; }
@@ -330,6 +333,57 @@ def cargar_datos_manejo():
     out['SCORE_CONDUCCION'] = pd.to_numeric(out['SCORE_CONDUCCION'], errors='coerce')
     out = out[out['MES'].notna() & (out['DOMINIO'].str.len() > 2) & out['SCORE_CONDUCCION'].notna()]
     return out[['DOMINIO','MES','SCORE_CONDUCCION']].reset_index(drop=True), diag
+@st.cache_data(ttl=600)
+def cargar_arreglos():
+    """Lee gasto de arreglos/reparaciones por patente desde Google Sheet.
+    Autodetecta columnas (patente, fecha, monto, descripción) igual que el resto
+    de fuentes. Devuelve (df, diag) donde diag informa columnas detectadas."""
+    from io import StringIO
+    diag = {'status': '?', 'rows': 0, 'cols': [], 'col_dom': None,
+            'col_fecha': None, 'col_monto': None, 'err': ''}
+    try:
+        url = f"https://docs.google.com/spreadsheets/d/{ARREGLOS_SHEET_ID}/gviz/tq?tqx=out:csv&gid={ARREGLOS_GID}"
+        r = requests.get(url, timeout=20)
+        diag['status'] = r.status_code
+        if r.status_code != 200:
+            diag['err'] = f'HTTP {r.status_code}'
+            return pd.DataFrame(), diag
+        df = pd.read_csv(StringIO(r.text))
+        df.columns = [str(c).strip() for c in df.columns]
+        diag['cols'] = list(df.columns)
+        diag['rows'] = len(df)
+        col_dom   = next((c for c in df.columns if any(k in c.upper() for k in ['PATENTE','DOMINIO','MOVIL','MÓVIL','UNIDAD','INTERNO'])), None)
+        col_fecha = next((c for c in df.columns if 'FECHA' in c.upper() or 'DATE' in c.upper()), None)
+        col_monto = next((c for c in df.columns if any(k in c.upper() for k in ['IMPORTE','MONTO','COSTO','GASTO','TOTAL','PRECIO','VALOR'])), None)
+        col_desc  = next((c for c in df.columns if any(k in c.upper() for k in ['DESCRIP','DETALLE','CONCEPTO','TIPO','TRABAJO','ARREGLO','REPARAC','OBSERV'])), None)
+        diag['col_dom'] = col_dom; diag['col_fecha'] = col_fecha; diag['col_monto'] = col_monto
+        if col_dom is None or col_monto is None:
+            diag['err'] = f'No se detectó columna patente/monto. Cols: {list(df.columns)}'
+            return pd.DataFrame(), diag
+        def parse_monto(s):
+            s = str(s).strip()
+            if s == '' or s.lower() == 'nan':
+                return np.nan
+            import re
+            s = re.sub(r'[^\d,.\-]', '', s)  # quita $, espacios, letras
+            if ',' in s and '.' in s:        # formato AR: 1.234.567,89
+                s = s.replace('.', '').replace(',', '.')
+            elif ',' in s:                    # 1234,89
+                s = s.replace(',', '.')
+            return pd.to_numeric(s, errors='coerce')
+        out = pd.DataFrame()
+        out['DOMINIO']     = df[col_dom].astype(str).str.strip().str.upper().str.replace(r'\s+', '', regex=True)
+        out['MONTO']       = df[col_monto].apply(parse_monto)
+        out['FECHA']       = pd.to_datetime(df[col_fecha], errors='coerce', dayfirst=True) if col_fecha else pd.NaT
+        out['DESCRIPCION'] = df[col_desc].astype(str).str.strip() if col_desc else ''
+        out['MONTO']       = pd.to_numeric(out['MONTO'], errors='coerce')
+        out = out[(out['DOMINIO'].str.len() > 2) & out['MONTO'].notna() & (out['MONTO'] > 0)].copy()
+        out['MES'] = out['FECHA'].dt.to_period('M')
+        diag['err'] = 'OK'
+        return out.reset_index(drop=True), diag
+    except Exception as e:
+        diag['err'] = str(e)[:160]
+        return pd.DataFrame(), diag
 def asignar_modelo(dominio):
     d = str(dominio).strip().upper()
     if d in SWAY_PATENTES:   return 'S-Way'
@@ -479,6 +533,7 @@ with st.spinner('Cargando telemetría, velocidades y datos de carga...'):
     df_carga_raw    = cargar_carga(tractores_flota)
     df_viajes_raw   = cargar_viajes_todos()
     df_manejo_raw, manejo_diag = cargar_datos_manejo()
+    df_arreglos_raw, arreglos_diag = cargar_arreglos()
 if df_raw.empty:
     st.warning('No se pudieron cargar datos.')
     st.stop()
@@ -565,6 +620,9 @@ if pg == "Dashboard Principal":
     l100_prom  = round(lts_total/kms_total*100,2) if kms_total>0 else 0
     costo_est  = lts_total*precio_gasoil
     n_unidades = df['DOMINIO'].nunique() if 'DOMINIO' in df.columns else 0
+    _fechas_flota = df['FECHA'].dropna() if 'FECHA' in df.columns else pd.Series([], dtype='datetime64[ns]')
+    dias_periodo  = (_fechas_flota.max()-_fechas_flota.min()).days+1 if not _fechas_flota.empty else 0
+    km_dia_flota  = kms_total/dias_periodo if dias_periodo>0 else 0
     if len(meses_df)>=2:
         delta_l100 = meses_df['L100'].iloc[-1]-meses_df['L100'].iloc[-2]
         delta_txt  = f"{'▲' if delta_l100>0 else '▼'} {abs(delta_l100):.2f} vs mes anterior"
@@ -577,9 +635,10 @@ if pg == "Dashboard Principal":
     kpi(k1,'','⛽ Litros totales',f'{lts_total:,.0f}',f'litros {anio_sel}')
     kpi(k2,'','🛣️ KM recorridos',f'{kms_total:,.0f}',f'kilómetros {anio_sel}')
     kpi(k3,delta_col,'📊 L/100km flota',f'{l100_prom:.2f}',delta_txt)
-    k4,k5 = st.columns(2)
+    k4,k5,k6 = st.columns(3)
     kpi(k4,'kpi-amber','💰 Costo estimado',f'${costo_est/1e6:.1f}M',f'@ ${precio_gasoil:,.0f}/L')
     kpi(k5,'kpi-green','🚛 Unidades activas',f'{n_unidades}','dominios únicos')
+    kpi(k6,'kpi-purple','🛣️ KM/día flota',f'{km_dia_flota:,.0f}',f'{dias_periodo} días de período' if dias_periodo>0 else 'sin fechas')
     st.divider()
     st.markdown(f'<div class="sec-title">Rendimiento por Modelo — {anio_sel}</div>', unsafe_allow_html=True)
     def stats_modelo(patentes_lista):
@@ -756,6 +815,85 @@ if pg == "Dashboard Principal":
             vel_show['Vel. Prom (km/h)']=vel_show['Vel. Prom (km/h)'].round(1)
             vel_show['Severidad total (km/h acum.)']=vel_show['Severidad total (km/h acum.)'].round(1)
             st.dataframe(vel_show, use_container_width=True, hide_index=True)
+    # ── Scatter: Score Conducción vs Consumo (L/100km) ──
+    st.divider()
+    st.markdown(f'<div class="sec-title">🎯 Score Conducción vs Consumo (L/100km) — {anio_sel}</div>', unsafe_allow_html=True)
+    if not df_manejo_filtrado.empty and 'SCORE_CONDUCCION' in df_manejo_filtrado.columns and 'L100KM' in df.columns:
+        _sc_man  = df_manejo_filtrado.groupby('DOMINIO')['SCORE_CONDUCCION'].mean()
+        _sc_l100 = df[df['L100KM']>0].groupby('DOMINIO')['L100KM'].mean()
+        _sc = pd.concat([_sc_man.rename('SCORE'), _sc_l100.rename('L100KM')], axis=1).dropna().reset_index()
+        if len(_sc)>=2:
+            _sc['MODELO']=_sc['DOMINIO'].apply(asignar_modelo)
+            _MC={'S-Way':'#60a5fa','Scania':'#f97316','Stralis':'#a78bfa'}
+            fig_sc=go.Figure()
+            for _m,_c in _MC.items():
+                _sub=_sc[_sc['MODELO']==_m]
+                if _sub.empty: continue
+                fig_sc.add_trace(go.Scatter(x=_sub['SCORE'],y=_sub['L100KM'],mode='markers+text',
+                    name=_m,text=_sub['DOMINIO'],textposition='top center',textfont=dict(size=9,color='#cbd5e1'),
+                    marker=dict(size=15,color=_c,line=dict(color='white',width=1.5)),
+                    hovertemplate='<b>%{text}</b> ('+_m+')<br>Score conducción: %{x:.2f}/10<br>L/100km: %{y:.2f}<extra></extra>'))
+            if len(_sc)>=3:
+                _z=np.polyfit(_sc['SCORE'],_sc['L100KM'],1)
+                _xs=np.linspace(_sc['SCORE'].min(),_sc['SCORE'].max(),50)
+                _corr=_sc['SCORE'].corr(_sc['L100KM'])
+                fig_sc.add_trace(go.Scatter(x=_xs,y=_z[0]*_xs+_z[1],mode='lines',name=f'Tendencia (r={_corr:.2f})',
+                    line=dict(color='#f59e0b',width=2,dash='dash'),hoverinfo='skip'))
+            fig_sc.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
+                legend=dict(bgcolor='rgba(15,23,42,0.8)',bordercolor='#334155',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
+                xaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text='Score conducción (/10) — mayor = mejor →',font=dict(color='#64748b'))),
+                yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text='L/100km — menor = más eficiente ↓',font=dict(color='#64748b'))),
+                height=460,margin=dict(l=10,r=10,t=50,b=50))
+            st.plotly_chart(fig_sc, use_container_width=True)
+            st.caption('Cada punto = una patente · Tendencia negativa esperada: mejor conducción → menor consumo')
+        else:
+            st.info('Se necesitan al menos 2 patentes con score de conducción y consumo para el scatter.')
+    else:
+        st.info('Sin datos de score de conducción para cruzar con el consumo.')
+    # ── Gasto en Arreglos por Patente ──
+    st.divider()
+    st.markdown(f'<div class="sec-title">🔧 Gasto en Arreglos por Patente — {anio_sel}</div>', unsafe_allow_html=True)
+    if df_arreglos_raw is not None and not df_arreglos_raw.empty:
+        _arr = df_arreglos_raw.copy()
+        _d = st.session_state.get('desde_periodo', None); _h = st.session_state.get('hasta_periodo', None)
+        if 'MES' in _arr.columns and _arr['MES'].notna().any():
+            if _d is not None and _h is not None:
+                _arr = _arr[(_arr['MES'].isna())|((_arr['MES']>=_d)&(_arr['MES']<=_h))]
+            elif 'FECHA' in _arr.columns:
+                _arr = _arr[(_arr['MES'].isna())|(_arr['FECHA'].dt.year==anio_sel)]
+        if _arr.empty:
+            st.info('Sin gastos de arreglos en el período seleccionado.')
+        else:
+            _gp = (_arr.groupby('DOMINIO').agg(GASTO=('MONTO','sum'),N=('MONTO','count'))
+                       .reset_index().sort_values('GASTO',ascending=False))
+            _gp['MODELO']=_gp['DOMINIO'].apply(asignar_modelo)
+            _tot=_gp['GASTO'].sum()
+            a1,a2,a3=st.columns(3)
+            kpi(a1,'kpi-red','💸 Gasto total arreglos',f'${_tot/1e6:.2f}M',f'{int(_gp["N"].sum())} arreglos')
+            kpi(a2,'kpi-amber','🔧 Patente que más gastó',f'{_gp.iloc[0]["DOMINIO"]}',f'${_gp.iloc[0]["GASTO"]:,.0f}')
+            kpi(a3,'','📊 Promedio por patente',f'${_gp["GASTO"].mean():,.0f}',f'{len(_gp)} patentes')
+            fig_arr=go.Figure([go.Bar(x=_gp['DOMINIO'],y=_gp['GASTO'],
+                marker_color=['#ef4444' if v==_gp['GASTO'].max() else '#f97316' for v in _gp['GASTO']],
+                text=[f'${v:,.0f}' for v in _gp['GASTO']],textposition='outside',textfont=dict(color='#e2e8f0',size=10),
+                customdata=_gp['N'],
+                hovertemplate='<b>%{x}</b><br>Gasto: <b>$%{y:,.0f}</b><br>Arreglos: %{customdata}<extra></extra>')])
+            _prom=_gp['GASTO'].mean()
+            fig_arr.add_hline(y=_prom,line_dash='dot',line_color='#f59e0b',line_width=2,annotation_text=f'Prom: ${_prom:,.0f}',annotation_position='top right',annotation_font_color='#fbbf24',annotation_font_size=11)
+            fig_arr.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
+                xaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8',size=10),tickangle=-45),
+                yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text='Gasto en arreglos ($)',font=dict(color='#64748b'))),
+                height=420,margin=dict(l=10,r=10,t=30,b=80),showlegend=False)
+            st.plotly_chart(fig_arr, use_container_width=True)
+            st.caption('🔴 Mayor gasto · 🟠 Resto · Línea amarilla = promedio flota · Fuente: Google Sheet de arreglos')
+            with st.expander('📋 Ver detalle de arreglos'):
+                _cols_det=[c for c in ['FECHA','DOMINIO','MONTO','DESCRIPCION'] if c in _arr.columns]
+                _det=_arr.sort_values('FECHA',ascending=False)[_cols_det].copy()
+                _det=_det.rename(columns={'FECHA':'Fecha','DOMINIO':'Patente','MONTO':'Monto','DESCRIPCION':'Descripción'})
+                if 'Monto' in _det.columns: _det['Monto']=_det['Monto'].apply(lambda x:f'${x:,.0f}')
+                st.dataframe(_det, use_container_width=True, hide_index=True)
+    else:
+        _arr_err = arreglos_diag.get('err','') if isinstance(arreglos_diag,dict) else ''
+        st.info(f'⚠️ No hay datos de arreglos disponibles. ({_arr_err}) Revisá la pestaña 🔧 Diagnóstico.')
     st.divider()
     with st.expander(f'Ver datos completos {anio_sel}'):
         cols_s=[c for c in ['DOMINIO','MARCA','MODELO','FECHA','KM','LITROS','L100KM'] if c in df.columns]
@@ -802,6 +940,40 @@ elif pg == "Modelo Predictivo":
             for c,mes,l100_p,lts_p in zip(kpi_cols2,meses_fut[4:],pred_l100[4:],pred_lts[4:]):
                 costo_p=lts_p*precio_gasoil
                 c.metric(label=f'Predicción {mes}',value=f'{l100_p:.2f} L/100km',delta=f'{lts_p:,.0f} L | ${costo_p/1e6:.2f}M')
+        st.divider()
+        st.markdown(f'<div class="sec-title">🎯 Consumo Esperado Próximo Mes — {meses_fut[0]}</div>', unsafe_allow_html=True)
+        _next_l100=float(pred_l100[0]); _next_lts=float(pred_lts[0]); _next_costo=_next_lts*precio_gasoil
+        _sigma=float(std_res); _ult_real=float(hist['L100'].iloc[-1])
+        _delta_vs_ult=_next_l100-_ult_real
+        _low1,_high1=_next_l100-_sigma,_next_l100+_sigma
+        st.markdown(f"""<div class="ier-info-box">
+        El modelo proyecta para <b>{meses_fut[0]}</b> un consumo de <b>{_next_l100:.2f} L/100km</b>.
+        Según el error típico del modelo (σ residuos = {_sigma:.2f}), lo esperable es que el valor real se
+        <b>desvíe ±{_sigma:.2f} L/100km</b> respecto de esa proyección — es decir, debería ubicarse entre
+        <b>{_low1:.2f}</b> y <b>{_high1:.2f} L/100km</b> (~68% de probabilidad).
+        Un desvío mayor a <b>±{1.5*_sigma:.2f}</b> (±1.5σ) se considera anómalo y dispara la alerta.
+        </div>""", unsafe_allow_html=True)
+        gc1,gc2=st.columns([3,2])
+        with gc1:
+            _ax_half=max(3*_sigma,1.0); _ax_min=max(0,_next_l100-_ax_half); _ax_max=_next_l100+_ax_half
+            fig_g=go.Figure(go.Indicator(
+                mode='gauge+number+delta',value=_next_l100,
+                number={'suffix':' L/100km','font':{'color':'#f1f5f9','size':32}},
+                delta={'reference':_ult_real,'increasing':{'color':'#ef4444'},'decreasing':{'color':'#22c55e'},'suffix':' vs último mes'},
+                title={'text':f'Proyección {meses_fut[0]}','font':{'color':'#94a3b8','size':14}},
+                gauge={'axis':{'range':[_ax_min,_ax_max],'tickcolor':'#94a3b8','tickfont':{'color':'#94a3b8'}},
+                       'bar':{'color':'#60a5fa'},'bgcolor':'rgba(30,41,59,0.6)','borderwidth':0,
+                       'steps':[{'range':[_ax_min,_low1],'color':'rgba(34,197,94,0.18)'},
+                                {'range':[_low1,_high1],'color':'rgba(59,130,246,0.30)'},
+                                {'range':[_high1,_ax_max],'color':'rgba(239,68,68,0.18)'}],
+                       'threshold':{'line':{'color':'#f59e0b','width':3},'thickness':0.85,'value':_ult_real}}))
+            fig_g.update_layout(paper_bgcolor='rgba(0,0,0,0)',font=dict(color='#e2e8f0'),height=300,margin=dict(l=20,r=20,t=50,b=10))
+            st.plotly_chart(fig_g, use_container_width=True)
+            st.caption(f'Banda azul = rango esperado ±1σ ({_low1:.2f}–{_high1:.2f}) · Línea amarilla = último mes real ({_ult_real:.2f}) · Verde/rojo = desvío favorable/desfavorable')
+        with gc2:
+            st.markdown(f'<div class="kpi-card"><div class="kpi-label">Consumo esperado</div><div class="kpi-value">{_next_l100:.2f}</div><div class="kpi-sub">L/100km · {meses_fut[0]} · {_delta_vs_ult:+.2f} vs último mes</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="kpi-card kpi-purple"><div class="kpi-label">Desvío esperado (±1σ)</div><div class="kpi-value">±{_sigma:.2f}</div><div class="kpi-sub">rango {_low1:.2f} – {_high1:.2f} L/100km</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="kpi-card kpi-amber"><div class="kpi-label">Litros / costo esperado</div><div class="kpi-value">${_next_costo/1e6:.2f}M</div><div class="kpi-sub">{_next_lts:,.0f} L @ ${precio_gasoil:,.0f}/L</div></div>', unsafe_allow_html=True)
         st.divider()
         st.markdown('<div class="sec-title">Evolución histórica completa con Proyección</div>', unsafe_allow_html=True)
         all_labels=[str(p) for p in hist['MES_PERIODO']]+meses_fut
@@ -882,6 +1054,13 @@ elif pg == "Análisis por Patente":
     resumen=df.groupby('DOMINIO').agg(LITROS_TOTAL=('LITROS','sum'),KM_TOTAL=('KM','sum'),MESES=('MES_PERIODO','nunique')).reset_index()
     resumen['L100KM_PROM']=(resumen['LITROS_TOTAL']/resumen['KM_TOTAL'].replace(0,np.nan)*100).round(2)
     resumen['LITROS_PROM_MES']=(resumen['LITROS_TOTAL']/resumen['MESES'].replace(0,np.nan)).round(0)
+    # Ratio km/día: KM total / días de actividad (span entre primera y última fecha)
+    def _dias_activos(s):
+        s=s.dropna()
+        return (s.max()-s.min()).days+1 if len(s)>0 else 0
+    _dias_pat=df.groupby('DOMINIO')['FECHA'].apply(_dias_activos).rename('DIAS_ACTIVOS').reset_index()
+    resumen=resumen.merge(_dias_pat,on='DOMINIO',how='left')
+    resumen['KM_DIA']=(resumen['KM_TOTAL']/resumen['DIAS_ACTIVOS'].replace(0,np.nan)).round(0)
     resumen=resumen[resumen['KM_TOTAL']>0].sort_values('L100KM_PROM',ascending=False)
     resumen['MODELO']=resumen['DOMINIO'].apply(asignar_modelo)
     if not df_ier.empty:
@@ -1015,13 +1194,14 @@ elif pg == "Análisis por Patente":
                 st.dataframe(df_show, use_container_width=True, hide_index=True)
     st.divider()
     st.markdown(f'<div class="sec-title">Tabla Resumen — Todas las Patentes {anio_sel}</div>', unsafe_allow_html=True)
-    cols_show=['DOMINIO','MODELO','LITROS_TOTAL','KM_TOTAL','L100KM_PROM','LITROS_PROM_MES','MESES']
-    col_names=['Patente','Modelo','Litros Total','KM Total','L/100km Prom','Litros/Mes Prom','Meses Activa']
+    cols_show=['DOMINIO','MODELO','LITROS_TOTAL','KM_TOTAL','KM_DIA','L100KM_PROM','LITROS_PROM_MES','MESES']
+    col_names=['Patente','Modelo','Litros Total','KM Total','KM/día','L/100km Prom','Litros/Mes Prom','Meses Activa']
     for c,n in [('IER','IER'),('CLASIFICACION','Clasificación IER'),(f'EXCESOS',f'Excesos >{LIMITE_VELOCIDAD}km/h'),('VEL_MAX','Vel. Máx (km/h)')]:
         if c in resumen.columns: cols_show.append(c); col_names.append(n)
     resumen_show=resumen[cols_show].copy(); resumen_show.columns=col_names
     resumen_show['Litros Total']=resumen_show['Litros Total'].apply(lambda x:f'{x:,.0f}')
     resumen_show['KM Total']=resumen_show['KM Total'].apply(lambda x:f'{x:,.0f}')
+    resumen_show['KM/día']=resumen_show['KM/día'].apply(lambda x:f'{x:,.0f}' if pd.notna(x) else '—')
     resumen_show['Litros/Mes Prom']=resumen_show['Litros/Mes Prom'].apply(lambda x:f'{x:,.0f}')
     st.dataframe(resumen_show, use_container_width=True, hide_index=True)
     st.caption(f'Datos {anio_sel} · Google Sheets Expreso Diemar · Actualización cada 10 min')
@@ -1065,11 +1245,23 @@ elif pg == "Datos Operativos":
     peso_prom_pat=peso_total/n_pat_con_carga if n_pat_con_carga>0 else 0; meses_con_carga=df_carga_anio['MES'].nunique()
     def kpi2(cont,color,label,value,sub=''):
         cont.markdown(f'<div class="kpi-card {color}"><div class="kpi-label">{label}</div><div class="kpi-value">{value}</div><div class="kpi-sub">{sub}</div></div>', unsafe_allow_html=True)
-    ck1,ck2,ck3,ck4=st.columns(4)
+    # % retornos vacíos (viajes finalizados con Peso Entregado = 0)
+    if df_viajes_raw is not None and not df_viajes_raw.empty:
+        if _desde is not None and _hasta is not None:
+            _vj_g = df_viajes_raw[(df_viajes_raw['MES']>=_desde)&(df_viajes_raw['MES']<=_hasta)&(df_viajes_raw['DOMINIO'].isin(_patentes_ld))]
+        else:
+            _vj_g = df_viajes_raw[(df_viajes_raw['MES'].apply(lambda p:p.year)==anio_sel)&(df_viajes_raw['DOMINIO'].isin(_patentes_ld))]
+        _n_tot_g = len(_vj_g); _n_vac_g = int((_vj_g['CON_CARGA']==0).sum())
+        _pct_vac_g = (_n_vac_g/_n_tot_g*100) if _n_tot_g>0 else 0.0
+    else:
+        _n_tot_g=0; _n_vac_g=0; _pct_vac_g=0.0
+    _color_vac = 'kpi-red' if _pct_vac_g>=30 else ('kpi-amber' if _pct_vac_g>=15 else 'kpi-green')
+    ck1,ck2,ck3,ck4,ck5=st.columns(5)
     kpi2(ck1,'kpi-purple','📦 Peso Total Entregado',f'{peso_total:,.1f}',f'toneladas {_rango_txt}')
     kpi2(ck2,'','🚛 Patentes con Carga',f'{n_pat_con_carga}',f'de {df["DOMINIO"].nunique()} activas')
     kpi2(ck3,'kpi-green','📊 Prom. por Patente',f'{peso_prom_pat:,.1f}','toneladas período')
     kpi2(ck4,'kpi-amber','📅 Meses con datos',f'{meses_con_carga}',f'{_rango_txt}')
+    kpi2(ck5,_color_vac,'🚫 % Retornos Vacíos',f'{_pct_vac_g:.1f}%',f'{_n_vac_g} de {_n_tot_g} viajes sin carga' if _n_tot_g>0 else 'sin datos de viajes')
     st.divider()
     # ──────────────────────────────────────────────────────────────────────
     #  MATRIZ L/100km vs kg/km — Diagnóstico de Carga
@@ -1336,6 +1528,19 @@ elif pg == "🔧 Diagnóstico":
         st.markdown(f"""
         <div style="background:#0f172a;border:1px solid #334155;border-radius:6px;padding:6px 10px;margin:3px 0;font-size:.78rem;font-family:monospace;color:#e2e8f0;">
         {_icon} <b>{d['modelo']}</b> · gid={d['gid']} · HTTP <span style="color:{_color};font-weight:700;">{d['status']}</span> · filas: {d['rows']} · col: <code>{d['col_score']}</code> · {d['err']}
+        </div>""", unsafe_allow_html=True)
+    st.markdown('## 🔧 Arreglos / Reparaciones')
+    _ok_arr = (df_arreglos_raw is not None) and (not df_arreglos_raw.empty)
+    if _ok_arr:
+        _det_arr = f'{len(df_arreglos_raw):,} arreglos · {df_arreglos_raw["DOMINIO"].nunique()} patentes · ${df_arreglos_raw["MONTO"].sum():,.0f} gasto total'
+    else:
+        _det_arr = f'Sin datos de arreglos. {arreglos_diag.get("err","")}'
+    _diag_card('Gasto en arreglos', _ok_arr, _det_arr, f'Sheet: {ARREGLOS_SHEET_ID} · gid={ARREGLOS_GID}')
+    if isinstance(arreglos_diag, dict):
+        st.markdown(f"""
+        <div style="background:#0f172a;border:1px solid #334155;border-radius:6px;padding:6px 10px;margin:3px 0;font-size:.78rem;font-family:monospace;color:#e2e8f0;">
+        Columnas detectadas → patente: <code>{arreglos_diag.get('col_dom')}</code> · fecha: <code>{arreglos_diag.get('col_fecha')}</code> · monto: <code>{arreglos_diag.get('col_monto')}</code><br>
+        Columnas en hoja: {arreglos_diag.get('cols')}
         </div>""", unsafe_allow_html=True)
     st.markdown('## ⛽ Precio combustible')
     _diag_card('Precio gasoil', True, f'${precio_gasoil:,.0f} / L', f'Fuente: {precio_fuente}')
