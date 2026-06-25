@@ -138,7 +138,7 @@ section[data-testid="stMain"] { background: #0f172a; }
 """
 pg = st.sidebar.radio(
     "Navegacion",
-    ["Dashboard Principal", "Modelo Predictivo", "Análisis por Patente", "Datos Operativos", "🔧 Diagnóstico"],
+    ["Dashboard Principal", "Modelo Predictivo", "Análisis por Patente", "Datos Operativos", "🗺️ Mapa Excesos", "🔧 Diagnóstico"],
     index=0,
     label_visibility="collapsed"
 )
@@ -180,14 +180,16 @@ def cargar_datos():
             df1["L100KM"] = (df1["LITROS"] / df1["KM"].replace(0, np.nan) * 100).round(2)
         if "EMPRESA" in df1.columns:
             df1 = df1[df1["EMPRESA"].str.upper().str.contains("LAD|DIEMAR", na=False)]
-        # Hoja UNIDADES eliminada. Patentes y todo lo demás salen de TELEMETRÍA.
-        # Ralentí eliminado del flujo.
         return df1, pd.DataFrame()
     except Exception as e:
         st.error(f"Error cargando datos: {e}")
         return pd.DataFrame(), pd.DataFrame()
 @st.cache_data(ttl=600)
 def cargar_velocidad():
+    """Lee la hoja Velocidades. Estructura esperada:
+       A: Movil (patente) | B: Fecha del evento | C: Latitud | D: Longitud | E: Ubicacion
+       + columnas extra (Velocidad, Gravedad, Tipo) si existen.
+       Detección de Velocidad por nombre o por heurística (50–200 km/h)."""
     try:
         df = pd.read_csv(URL_VEL)
         df.columns = [str(c).strip() for c in df.columns]
@@ -195,17 +197,35 @@ def cargar_velocidad():
         for c in df.columns:
             cl = c.lower()
             if   "movil" in cl or "patente" in cl or "dominio" in cl: col_map[c] = "DOMINIO"
-            elif "fecha"    in cl:                                      col_map[c] = "FECHA"
-            elif "veloc"    in cl:                                      col_map[c] = "VELOCIDAD"
-            elif "gravedad" in cl:                                      col_map[c] = "GRAVEDAD"
-            elif "tipo"     in cl:                                      col_map[c] = "TIPO"
+            elif "fecha"    in cl or "evento" in cl:                  col_map[c] = "FECHA"
+            elif "veloc"    in cl:                                    col_map[c] = "VELOCIDAD"
+            elif "gravedad" in cl:                                    col_map[c] = "GRAVEDAD"
+            elif "tipo"     in cl:                                    col_map[c] = "TIPO"
+            elif "latitud"  in cl or cl == "lat":                     col_map[c] = "LAT"
+            elif "longitud" in cl or cl in ("lon","lng","long"):      col_map[c] = "LON"
+            elif "ubicac"   in cl or "direcc" in cl:                  col_map[c] = "UBICACION"
         df = df.rename(columns=col_map)
         if "DOMINIO" in df.columns:
-            df["DOMINIO"] = df["DOMINIO"].astype(str).str.strip().str.upper()
+            df["DOMINIO"] = df["DOMINIO"].astype(str).str.strip().str.upper().str.replace(r"\s+","",regex=True)
         if "FECHA" in df.columns:
             df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce", dayfirst=True)
+        for c in ["LAT","LON"]:
+            if c in df.columns:
+                df[c] = pd.to_numeric(
+                    df[c].astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False),
+                    errors="coerce"
+                )
+                # Corrección: si por separador miles quedó tipo -3443 cuando era -34,43 → dividir por 100
+                # Heurística: si abs(LAT) > 90 o abs(LON) > 180 dividir potencias de 10
+                if c == "LAT":
+                    mask = df[c].abs() > 90
+                    df.loc[mask, c] = df.loc[mask, c] / 100
+                else:
+                    mask = df[c].abs() > 180
+                    df.loc[mask, c] = df.loc[mask, c] / 100
         if "VELOCIDAD" not in df.columns:
             for c in df.columns:
+                if c in ("DOMINIO","FECHA","LAT","LON","UBICACION","GRAVEDAD","TIPO"): continue
                 try:
                     serie = pd.to_numeric(df[c].astype(str).str.replace(",", ".", regex=False), errors="coerce")
                     if serie.dropna().between(50, 200).mean() > 0.5:
@@ -214,16 +234,16 @@ def cargar_velocidad():
                 except Exception:
                     continue
         if "VELOCIDAD" not in df.columns:
-            return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH"])
+            return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH","LAT","LON","UBICACION"])
         df["VELOCIDAD"] = pd.to_numeric(
             df["VELOCIDAD"].astype(str).str.replace(",", ".", regex=False), errors="coerce"
         )
         df = df[df["VELOCIDAD"] > LIMITE_VELOCIDAD].copy()
         df["EXCESO_KMH"] = (df["VELOCIDAD"] - LIMITE_VELOCIDAD).round(1)
-        keep = [c for c in ["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH","GRAVEDAD","TIPO"] if c in df.columns]
+        keep = [c for c in ["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH","GRAVEDAD","TIPO","LAT","LON","UBICACION"] if c in df.columns]
         return df[keep].dropna(subset=["DOMINIO","FECHA"]).reset_index(drop=True)
     except Exception:
-        return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH"])
+        return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH","LAT","LON","UBICACION"])
 @st.cache_data(ttl=3600)
 def cargar_carga(tractores_validos=None):
     try:
@@ -243,10 +263,6 @@ def cargar_carga(tractores_validos=None):
         df = df[(df[col_peso] > 0) & df[col_fecha].notna()].copy()
         def norm_pat(p):
             return re.sub(r'\s+', '', str(p).strip().upper())
-        # La celda UNIDADES puede traer "TRACTOR, ACOPLADO" en cualquier orden.
-        # Estrategia: dentro de cada celda, elegir la patente que figure en la flota
-        # de tractores (telemetría). Si ninguna matchea → tomar la primera (fallback).
-        # Así el peso NUNCA se duplica y siempre se asigna al tractor real.
         tractores_set = set()
         if tractores_validos is not None:
             tractores_set = {norm_pat(t) for t in tractores_validos if pd.notna(t)}
@@ -269,7 +285,6 @@ def cargar_carga(tractores_validos=None):
         return pd.DataFrame()
 @st.cache_data(ttl=3600)
 def cargar_viajes_todos():
-    """Carga todos los viajes finalizados del BI (con y sin peso) para calcular % de retornos vacíos."""
     try:
         import re
         df = pd.read_excel(CARGA_URL)
@@ -287,7 +302,6 @@ def cargar_viajes_todos():
         df = df[df[col_fecha].notna()].copy()
         def norm_pat(p):
             return re.sub(r'\s+', '', str(p).strip().upper())
-        # Misma lógica que cargar_carga: primera patente = tractor
         df['DOMINIO']   = df[col_unid].astype(str).str.split(',').str[0].apply(norm_pat)
         df['MES']       = df[col_fecha].dt.to_period('M')
         df['PESO_TON']  = df[col_peso] / 1000.0
@@ -300,7 +314,6 @@ def obtener_precio_gasoil():
     return 2300.0, "valor base manual"
 @st.cache_data(ttl=600)
 def cargar_datos_manejo():
-    """Lee SCORE GENERAL de las 3 hojas (Stralis, S-Way, Scania) usando gviz."""
     dfs = []
     diag = []
     for sheet in MANEJO_SHEETS:
@@ -339,9 +352,6 @@ def cargar_datos_manejo():
     return out[['DOMINIO','MES','SCORE_CONDUCCION']].reset_index(drop=True), diag
 @st.cache_data(ttl=600)
 def cargar_arreglos():
-    """Lee gasto de arreglos/reparaciones por patente desde Google Sheet.
-    Autodetecta columnas (patente, fecha, monto, descripción) igual que el resto
-    de fuentes. Devuelve (df, diag) donde diag informa columnas detectadas."""
     from io import StringIO
     diag = {'status': '?', 'rows': 0, 'cols': [], 'col_dom': None,
             'col_fecha': None, 'col_monto': None, 'err': ''}
@@ -369,10 +379,10 @@ def cargar_arreglos():
             if s == '' or s.lower() == 'nan':
                 return np.nan
             import re
-            s = re.sub(r'[^\d,.\-]', '', s)  # quita $, espacios, letras
-            if ',' in s and '.' in s:        # formato AR: 1.234.567,89
+            s = re.sub(r'[^\d,.\-]', '', s)
+            if ',' in s and '.' in s:
                 s = s.replace('.', '').replace(',', '.')
-            elif ',' in s:                    # 1234,89
+            elif ',' in s:
                 s = s.replace(',', '.')
             return pd.to_numeric(s, errors='coerce')
         out = pd.DataFrame()
@@ -390,9 +400,6 @@ def cargar_arreglos():
         return pd.DataFrame(), diag
 @st.cache_data(ttl=600)
 def cargar_gasto_combustible():
-    """Lee la planilla de gastos: filtra col F (c tipo) == X10, agarra el mes
-    más reciente según col A (fecha) y promedia col I (monto estimado).
-    Devuelve (gasto_prom, mes_str, n_filas, diag)."""
     from io import StringIO
     diag = {'status':'?', 'rows':0, 'cols':[], 'mes':None, 'n_mes':0, 'tipo_filter':GASTO_COMB_TIPO, 'err':''}
     try:
@@ -408,11 +415,9 @@ def cargar_gasto_combustible():
         if df.shape[1] < 9:
             diag['err'] = f'La hoja tiene solo {df.shape[1]} columnas (se esperan al menos 9 hasta I).'
             return np.nan, None, 0, diag
-        # Acceso posicional: A=0 (fecha), F=5 (c tipo), I=8 (monto estimado)
         col_fecha = df.iloc[:, 0]
         col_tipo  = df.iloc[:, 5]
         col_monto = df.iloc[:, 8]
-        # Parseo monto formato AR ("$1.234,56" / "1234,56" / "1234.56")
         def parse_monto(s):
             s = str(s).strip()
             if not s or s.lower() == 'nan': return np.nan
@@ -427,14 +432,13 @@ def cargar_gasto_combustible():
             'MONTO': col_monto.apply(parse_monto),
         })
         sub = sub[(sub['TIPO']==GASTO_COMB_TIPO.upper()) & sub['FECHA'].notna() & sub['MONTO'].notna() & (sub['MONTO']>0)]
-        # Descartar fechas futuras (typos) y quedarnos con el mes más cercano a hoy
         hoy = pd.Timestamp.now().normalize()
         sub = sub[sub['FECHA'] <= hoy]
         if sub.empty:
             diag['err'] = f'Sin filas tipo "{GASTO_COMB_TIPO}" con fecha (≤ hoy) y monto válidos.'
             return np.nan, None, 0, diag
         sub['MES'] = sub['FECHA'].dt.to_period('M')
-        mes_max = sub['MES'].max()          # mes más reciente (más cercano a hoy)
+        mes_max = sub['MES'].max()
         sub_mes = sub[sub['MES']==mes_max]
         gasto_prom = float(sub_mes['MONTO'].mean())
         diag['mes'] = str(mes_max); diag['n_mes'] = int(len(sub_mes)); diag['err'] = 'OK'
@@ -478,7 +482,7 @@ def calcular_ier(df, df_vel=None, df_carga=None, df_manejo=None):
         vel_counts = df_vel.groupby('DOMINIO').agg(
             EXCESOS=('DOMINIO','count'),
             VEL_MAX=('VELOCIDAD','max'),
-            SEVERIDAD=('EXCESO_KMH','sum')  # km/h acumulados sobre el límite: combina frecuencia + magnitud
+            SEVERIDAD=('EXCESO_KMH','sum')
         ).reset_index()
         agg = agg.merge(vel_counts, on='DOMINIO', how='left')
         agg['EXCESOS']   = agg['EXCESOS'].fillna(0).astype(int)
@@ -487,7 +491,6 @@ def calcular_ier(df, df_vel=None, df_carga=None, df_manejo=None):
     else:
         agg['EXCESOS'] = 0; agg['VEL_MAX'] = 0; agg['SEVERIDAD'] = 0.0
     agg['MODELO'] = agg['DOMINIO'].apply(asignar_modelo)
-    # Alineación temporal: TONKML usa SOLO meses con telemetría Y carga simultánea
     agg['KM_CARGA']     = 0.0
     agg['LITROS_CARGA'] = 0.0
     if df_carga is not None and not df_carga.empty and 'MES_PERIODO' in df_c.columns and 'MES' in df_carga.columns:
@@ -511,14 +514,12 @@ def calcular_ier(df, df_vel=None, df_carga=None, df_manejo=None):
             agg['PESO_TON'] = 0.0
     else:
         agg['PESO_TON'] = 0.0
-    # TONKML alineado: usa KM y LITROS de los mismos meses que PESO_TON
     agg['TONKML'] = np.where(
         (agg['PESO_TON']>0)&(agg['LITROS_CARGA']>0),
         (agg['PESO_TON']*agg['KM_CARGA'])/agg['LITROS_CARGA'], np.nan)
     tiene_carga = agg['PESO_TON'].sum() > 0
     def _safe_mean(x):
         v = x.dropna(); return v.mean() if len(v)>0 else np.nan
-    # Mergear score conducción (promedio por patente en el período)
     if df_manejo is not None and not df_manejo.empty and 'SCORE_CONDUCCION' in df_manejo.columns:
         manejo_agg = df_manejo.groupby('DOMINIO')['SCORE_CONDUCCION'].mean().reset_index()
         agg = agg.merge(manejo_agg, on='DOMINIO', how='left')
@@ -538,7 +539,6 @@ def calcular_ier(df, df_vel=None, df_carga=None, df_manejo=None):
         mask = agg['MODELO']==modelo
         idx  = agg.index[mask]
         if mask.sum()==0: continue
-        # SCORE_CONSUMO basado en ton·km/L (eficiencia productiva).
         tkml_grp = agg.loc[idx,'TONKML']
         if tiene_carga and tkml_grp.fillna(0).gt(0).sum() > 1:
             agg.loc[idx,'SCORE_CONSUMO'] = calcular_score_zscore(tkml_grp.fillna(0), higher_is_better=True, k=0.4, min_sigma_pct=0.10).values
@@ -557,7 +557,6 @@ def calcular_ier(df, df_vel=None, df_carga=None, df_manejo=None):
         if len(manejo_idx) > 1:
             agg.loc[manejo_idx,'SCORE_MANEJO'] = calcular_score_zscore(
                 agg.loc[manejo_idx,'SCORE_CONDUCCION'], higher_is_better=True, k=0.4, min_sigma_pct=0.05).values
-    # Ponderación 50/40/10 cuando hay score manejo. Si no hay, redistribuye al consumo.
     def _ier_row(r):
         if r['TIENE_MANEJO']:
             return 0.50 * r['SCORE_CONSUMO'] + 0.40 * r['SCORE_MANEJO'] + 0.10 * r['SCORE_VEL']
@@ -585,8 +584,6 @@ def calcular_ier(df, df_vel=None, df_carga=None, df_manejo=None):
 with st.spinner('Cargando telemetría, velocidades y datos de carga...'):
     df_raw, _      = cargar_datos()
     df_vel_raw     = cargar_velocidad()
-    # Tractores tomados de TELEMETRÍA. Se pasan a cargar_carga para identificar
-    # la patente correcta cuando UNIDADES del BI trae tractor+acoplado en la misma celda.
     tractores_flota = tuple(df_raw['DOMINIO'].dropna().unique()) if (df_raw is not None and not df_raw.empty and 'DOMINIO' in df_raw.columns) else ()
     df_carga_raw    = cargar_carga(tractores_flota)
     df_viajes_raw   = cargar_viajes_todos()
@@ -596,8 +593,6 @@ with st.spinner('Cargando telemetría, velocidades y datos de carga...'):
 if df_raw.empty:
     st.warning('No se pudieron cargar datos.')
     st.stop()
-# Precio gasoil = monto estimado X10 del mes más cercano a hoy (planilla de gastos).
-# Si la planilla no está disponible, cae al valor base manual.
 if not (gasto_comb_prom is None or (isinstance(gasto_comb_prom, float) and np.isnan(gasto_comb_prom))):
     precio_gasoil = float(gasto_comb_prom)
     precio_fuente = f"X10 {gasto_comb_mes} (planilla gastos)"
@@ -626,7 +621,6 @@ if 'FECHA' in df.columns and df['FECHA'].notna().any():
         hasta_idx = st.sidebar.selectbox('Hasta (mes/año)', options=periodos_str, index=len(periodos_str)-1)
         desde_periodo = pd.Period(desde_idx, 'M')
         hasta_periodo = pd.Period(hasta_idx, 'M')
-        # Exponer globalmente para que otras secciones (Datos Operativos) puedan filtrar
         st.session_state['desde_periodo'] = desde_periodo
         st.session_state['hasta_periodo'] = hasta_periodo
         df = df[(df['FECHA'].dt.to_period('M')>=desde_periodo)&(df['FECHA'].dt.to_period('M')<=hasta_periodo)]
@@ -656,7 +650,6 @@ if not df.empty and not df_vel_anio.empty and 'FECHA' in df_vel_anio.columns:
     df_vel_filtrado = df_vel_anio[(_vel_periodos>=_mes_min)&(_vel_periodos<=_mes_max)&(df_vel_anio['DOMINIO'].isin(df['DOMINIO'].unique()))].copy()
 else:
     df_vel_filtrado = df_vel_anio.copy()
-# ── Filtrar manejo por mismo rango Desde/Hasta del sidebar ──
 if not df_manejo_raw.empty and 'MES' in df_manejo_raw.columns and not df.empty:
     _mes_min_p = df['FECHA'].dropna().dt.to_period('M').min()
     _mes_max_p = df['FECHA'].dropna().dt.to_period('M').max()
@@ -799,7 +792,7 @@ if pg == "Dashboard Principal":
             index=0, horizontal=True, key='ier_sort_mode'
         )
         if orden_ier.startswith('🏆'):
-            df_ier_sorted = df_ier.sort_values('IER', ascending=True)  # ascending para que el más alto quede arriba en plot horizontal
+            df_ier_sorted = df_ier.sort_values('IER', ascending=True)
         else:
             df_ier_sorted = df_ier.sort_values(['MODELO','IER'],ascending=[True,False])
         fig_ier=go.Figure()
@@ -880,7 +873,6 @@ if pg == "Dashboard Principal":
             vel_show['Vel. Prom (km/h)']=vel_show['Vel. Prom (km/h)'].round(1)
             vel_show['Severidad total (km/h acum.)']=vel_show['Severidad total (km/h acum.)'].round(1)
             st.dataframe(vel_show, use_container_width=True, hide_index=True)
-    # ── Scatter: Score Conducción vs Consumo (L/100km) ──
     st.divider()
     st.markdown(f'<div class="sec-title">🎯 Score Conducción vs Consumo (L/100km) — {anio_sel}</div>', unsafe_allow_html=True)
     if not df_manejo_filtrado.empty and 'SCORE_CONDUCCION' in df_manejo_filtrado.columns and 'L100KM' in df.columns:
@@ -915,7 +907,6 @@ if pg == "Dashboard Principal":
             st.info('Se necesitan al menos 2 patentes con score de conducción y consumo para el scatter.')
     else:
         st.info('Sin datos de score de conducción para cruzar con el consumo.')
-    # ── Gasto en Arreglos por Patente ──
     st.divider()
     st.markdown(f'<div class="sec-title">🔧 Gasto en Arreglos por Patente — {anio_sel}</div>', unsafe_allow_html=True)
     if df_arreglos_raw is not None and not df_arreglos_raw.empty:
@@ -1072,8 +1063,6 @@ elif pg == "Modelo Predictivo":
         st.caption(f'±1.5σ intervalo de confianza | Línea roja = histórico ({n_meses_entrenamiento} meses) | Línea azul = predicción')
         st.divider()
         st.markdown('<div class="sec-title">🚨 Alerta de Desvío — Predicción vs. Real</div>', unsafe_allow_html=True)
-        # Usa el último mes del rango filtrado del sidebar (meses_df) como mes a evaluar.
-        # Re-entrena el polinomio con TODO lo histórico anterior a ese mes para predecirlo.
         mes_eval = (meses_df['MES_PERIODO'].iloc[-1] if not meses_df.empty
                     else hist['MES_PERIODO'].iloc[-1])
         real_l100_eval = (float(meses_df['L100'].iloc[-1]) if not meses_df.empty
@@ -1129,7 +1118,6 @@ elif pg == "Análisis por Patente":
     resumen=df.groupby('DOMINIO').agg(LITROS_TOTAL=('LITROS','sum'),KM_TOTAL=('KM','sum'),MESES=('MES_PERIODO','nunique')).reset_index()
     resumen['L100KM_PROM']=(resumen['LITROS_TOTAL']/resumen['KM_TOTAL'].replace(0,np.nan)*100).round(2)
     resumen['LITROS_PROM_MES']=(resumen['LITROS_TOTAL']/resumen['MESES'].replace(0,np.nan)).round(0)
-    # Ratio km/día: KM total / días de actividad (span entre primera y última fecha)
     def _dias_activos(s):
         s=s.dropna()
         return (s.max()-s.min()).days+1 if len(s)>0 else 0
@@ -1294,9 +1282,7 @@ elif pg == "Datos Operativos":
     if df_carga_raw is None or df_carga_raw.empty:
         st.warning('⚠️ No hay datos de carga disponibles. Verificá la conexión al sistema BI (reporte_hojas.xlsx).')
         st.stop()
-    # Solo patentes LAD (las mismas del df de telemetría)
     _patentes_ld = df['DOMINIO'].dropna().unique()
-    # Filtro temporal: usa Desde/Hasta del sidebar
     _desde = st.session_state.get('desde_periodo', None)
     _hasta = st.session_state.get('hasta_periodo', None)
     if _desde is not None and _hasta is not None:
@@ -1320,7 +1306,6 @@ elif pg == "Datos Operativos":
     peso_prom_pat=peso_total/n_pat_con_carga if n_pat_con_carga>0 else 0; meses_con_carga=df_carga_anio['MES'].nunique()
     def kpi2(cont,color,label,value,sub=''):
         cont.markdown(f'<div class="kpi-card {color}" style="padding:14px 16px;"><div class="kpi-label" style="font-size:.7rem;">{label}</div><div class="kpi-value" style="font-size:1.45rem;">{value}</div><div class="kpi-sub" style="font-size:.7rem;">{sub}</div></div>', unsafe_allow_html=True)
-    # % retornos vacíos (viajes finalizados con Peso Entregado = 0)
     if df_viajes_raw is not None and not df_viajes_raw.empty:
         if _desde is not None and _hasta is not None:
             _vj_g = df_viajes_raw[(df_viajes_raw['MES']>=_desde)&(df_viajes_raw['MES']<=_hasta)&(df_viajes_raw['DOMINIO'].isin(_patentes_ld))]
@@ -1338,9 +1323,6 @@ elif pg == "Datos Operativos":
     kpi2(ck4,'kpi-amber','📅 Meses con datos',f'{meses_con_carga}',f'{_rango_txt}')
     kpi2(ck5,_color_vac,'🚫 % Retornos Vacíos',f'{_pct_vac_g:.1f}%',f'{_n_vac_g} de {_n_tot_g} viajes sin carga' if _n_tot_g>0 else 'sin datos de viajes')
     st.divider()
-    # ──────────────────────────────────────────────────────────────────────
-    #  MATRIZ L/100km vs kg/km — Diagnóstico de Carga
-    # ──────────────────────────────────────────────────────────────────────
     st.markdown(f'<div class="sec-title">🔬 Diagnóstico de Carga — Matriz L/100km vs kg/km — {_rango_txt}</div>', unsafe_allow_html=True)
     st.markdown("""<div class="ier-info-box">
     <b>¿Cómo leer esta matriz?</b> Cada punto es una patente. Los ejes separan consumo (L/100km) y densidad de carga (kg transportados por km recorrido).<br>
@@ -1353,7 +1335,6 @@ elif pg == "Datos Operativos":
     _mat = _km_pat.merge(_l100_pat, on='DOMINIO').merge(_tons_pat, on='DOMINIO', how='inner')
     _mat['KG_KM']  = (_mat['PESO_TON'] * 1000 / _mat['KM']).round(2)
     _mat['MODELO'] = _mat['DOMINIO'].apply(asignar_modelo)
-    # Viajes vacíos
     if df_viajes_raw is not None and not df_viajes_raw.empty:
         if _desde is not None and _hasta is not None:
             _vj = df_viajes_raw[(df_viajes_raw['MES']>=_desde)&(df_viajes_raw['MES']<=_hasta)&(df_viajes_raw['DOMINIO'].isin(_patentes_ld))]
@@ -1439,7 +1420,6 @@ elif pg == "Datos Operativos":
             height=560, margin=dict(l=70,r=50,t=40,b=70))
         st.plotly_chart(fig_mat, use_container_width=True)
         st.caption('Cada punto = una patente · Líneas punteadas = mediana de la flota · Hover para diagnóstico completo')
-        # Tarjetas de diagnóstico individual
         st.markdown('<div class="sec-title">📋 Diagnóstico Individual por Patente</div>', unsafe_allow_html=True)
         _mat_sorted = _mat.sort_values('CUAD_COLOR', key=lambda s: s.map({'#ef4444':0,'#f97316':1,'#f59e0b':2,'#22c55e':3}))
         _diag_cols = st.columns(min(4, len(_mat_sorted)))
@@ -1556,6 +1536,152 @@ elif pg == "Datos Operativos":
     st.caption(f'Fuente: reporte_hojas.xlsx (BI Expreso) · Telemetría Google Sheets · Período {_rango_txt}')
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  PESTAÑA — MAPA DE EXCESOS DE VELOCIDAD
+# ═══════════════════════════════════════════════════════════════════════════════
+elif pg == "🗺️ Mapa Excesos":
+    import folium
+    from folium.plugins import HeatMap, MarkerCluster
+    from streamlit_folium import st_folium
+
+    col_logo_m, col_title_m = st.columns([1,5])
+    with col_logo_m: st.image(LOGO_URL, width=130)
+    with col_title_m:
+        st.markdown(f"""<div style='padding:8px 0;'>
+        <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>🗺️ Mapa de Excesos de Velocidad</div>
+        <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Geolocalización de eventos &gt;{LIMITE_VELOCIDAD} km/h · {anio_sel}</div>
+        </div>""", unsafe_allow_html=True)
+
+    if df_vel_filtrado.empty:
+        st.warning('Sin eventos de velocidad en el período filtrado.')
+        st.stop()
+
+    if 'LAT' not in df_vel_filtrado.columns or 'LON' not in df_vel_filtrado.columns:
+        st.error("⚠️ La hoja de velocidades no tiene columnas Latitud/Longitud detectables.")
+        st.caption(f"Columnas detectadas: {list(df_vel_filtrado.columns)}")
+        st.stop()
+
+    df_map = df_vel_filtrado.dropna(subset=['LAT','LON']).copy()
+    # bbox Argentina
+    df_map = df_map[(df_map['LAT'].between(-55, -21)) & (df_map['LON'].between(-74, -53))]
+
+    if df_map.empty:
+        st.warning('No hay eventos con coordenadas válidas dentro de Argentina.')
+        st.stop()
+
+    st.markdown('<div class="sec-title">Filtros del mapa</div>', unsafe_allow_html=True)
+    fc1, fc2, fc3, fc4 = st.columns(4)
+    with fc1:
+        modo = st.selectbox('Vista', ['🔥 Mapa de calor', '📍 Marcadores agrupados', '🎯 Puntos individuales'])
+    with fc2:
+        pats_map = sorted(df_map['DOMINIO'].unique().tolist())
+        pat_filt = st.multiselect('Patente', pats_map, default=[], placeholder="Todas")
+    with fc3:
+        _max_exc = int(df_map['EXCESO_KMH'].max())
+        sev_min = st.slider('Exceso mínimo (km/h sobre límite)', 0, _max_exc if _max_exc>0 else 1, 0)
+    with fc4:
+        df_map['MODELO_TMP'] = df_map['DOMINIO'].apply(asignar_modelo)
+        modelos_map = sorted(df_map['MODELO_TMP'].unique().tolist())
+        mod_filt = st.multiselect('Modelo', modelos_map, default=modelos_map)
+
+    df_map['MODELO'] = df_map['DOMINIO'].apply(asignar_modelo)
+    if pat_filt: df_map = df_map[df_map['DOMINIO'].isin(pat_filt)]
+    if mod_filt: df_map = df_map[df_map['MODELO'].isin(mod_filt)]
+    df_map = df_map[df_map['EXCESO_KMH'] >= sev_min]
+
+    if df_map.empty:
+        st.warning('Sin eventos con los filtros seleccionados.')
+        st.stop()
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric('📍 Eventos mapeados', f"{len(df_map):,}")
+    k2.metric('🚨 Severidad total', f"{df_map['EXCESO_KMH'].sum():.0f} km/h")
+    k3.metric('⚡ Vel. máxima', f"{df_map['VELOCIDAD'].max():.0f} km/h")
+    k4.metric('🚛 Patentes', f"{df_map['DOMINIO'].nunique()}")
+
+    st.markdown('<br>', unsafe_allow_html=True)
+
+    lat_c = df_map['LAT'].mean()
+    lon_c = df_map['LON'].mean()
+    m = folium.Map(location=[lat_c, lon_c], zoom_start=5, tiles='CartoDB dark_matter')
+
+    if modo.startswith('🔥'):
+        heat_data = [[r['LAT'], r['LON'], float(r['EXCESO_KMH'])] for _, r in df_map.iterrows()]
+        HeatMap(heat_data, radius=15, blur=20, max_zoom=10,
+                gradient={0.2:'#22c55e', 0.4:'#f59e0b', 0.6:'#f97316', 0.8:'#ef4444', 1.0:'#7f1d1d'}).add_to(m)
+
+    elif modo.startswith('📍'):
+        cluster = MarkerCluster().add_to(m)
+        for _, r in df_map.iterrows():
+            color = '#ef4444' if r['EXCESO_KMH']>=15 else ('#f97316' if r['EXCESO_KMH']>=7 else '#f59e0b')
+            ubic = r.get('UBICACION', '—')
+            popup = f"""<b>{r['DOMINIO']}</b> ({r['MODELO']})<br>
+            Vel: <b>{r['VELOCIDAD']:.0f} km/h</b><br>
+            Exceso: +{r['EXCESO_KMH']:.0f} km/h<br>
+            Fecha: {r['FECHA'].strftime('%d/%m/%Y %H:%M') if pd.notna(r['FECHA']) else '—'}<br>
+            Ubicación: {ubic}"""
+            folium.CircleMarker(
+                location=[r['LAT'], r['LON']], radius=6,
+                color=color, fill=True, fill_color=color, fill_opacity=0.8,
+                popup=folium.Popup(popup, max_width=280),
+                tooltip=f"{r['DOMINIO']} · {r['VELOCIDAD']:.0f} km/h"
+            ).add_to(cluster)
+
+    else:
+        for _, r in df_map.iterrows():
+            color = '#ef4444' if r['EXCESO_KMH']>=15 else ('#f97316' if r['EXCESO_KMH']>=7 else '#f59e0b')
+            radius = 4 + min(r['EXCESO_KMH']/3, 10)
+            ubic = r.get('UBICACION', '—')
+            popup = f"""<b>{r['DOMINIO']}</b> ({r['MODELO']})<br>
+            Vel: <b>{r['VELOCIDAD']:.0f} km/h</b><br>
+            Exceso: +{r['EXCESO_KMH']:.0f} km/h<br>
+            Fecha: {r['FECHA'].strftime('%d/%m/%Y %H:%M') if pd.notna(r['FECHA']) else '—'}<br>
+            Ubicación: {ubic}"""
+            folium.CircleMarker(
+                location=[r['LAT'], r['LON']], radius=radius,
+                color=color, fill=True, fill_color=color, fill_opacity=0.6, weight=1,
+                popup=folium.Popup(popup, max_width=280),
+                tooltip=f"{r['DOMINIO']} · {r['VELOCIDAD']:.0f} km/h"
+            ).add_to(m)
+
+    st_folium(m, use_container_width=True, height=620, returned_objects=[])
+
+    st.caption(f"🟡 Leve (<7) · 🟠 Medio (7–15) · 🔴 Grave (≥15 km/h sobre límite {LIMITE_VELOCIDAD})")
+
+    st.divider()
+    st.markdown('<div class="sec-title">🔥 Top Zonas Críticas (grilla ~11km)</div>', unsafe_allow_html=True)
+    df_map['LAT_BIN'] = (df_map['LAT']*10).round()/10
+    df_map['LON_BIN'] = (df_map['LON']*10).round()/10
+    hotspots = (df_map.groupby(['LAT_BIN','LON_BIN'])
+                .agg(EVENTOS=('DOMINIO','count'),
+                     SEVERIDAD=('EXCESO_KMH','sum'),
+                     VEL_MAX=('VELOCIDAD','max'),
+                     PATENTES=('DOMINIO',lambda s: ', '.join(sorted(s.unique()))),
+                     UBICACION=('UBICACION', lambda s: s.iloc[0] if 'UBICACION' in df_map.columns and len(s)>0 else '—'))
+                .reset_index().sort_values('SEVERIDAD',ascending=False).head(15))
+    cols_hot = ['LAT_BIN','LON_BIN','EVENTOS','SEVERIDAD','VEL_MAX','PATENTES']
+    if 'UBICACION' in hotspots.columns: cols_hot.append('UBICACION')
+    hotspots = hotspots[cols_hot]
+    hotspots.columns = ['Lat','Lon','Eventos','Severidad acum.','Vel. máx','Patentes'] + (['Ubicación ejemplo'] if 'UBICACION' in df_map.columns else [])
+    st.dataframe(hotspots, use_container_width=True, hide_index=True)
+
+    st.markdown('<div class="sec-title">🚛 Ranking por patente (eventos geolocalizados)</div>', unsafe_allow_html=True)
+    rank_pat = (df_map.groupby('DOMINIO').agg(
+        EVENTOS=('DOMINIO','count'),
+        SEVERIDAD=('EXCESO_KMH','sum'),
+        VEL_MAX=('VELOCIDAD','max'),
+        VEL_PROM=('VELOCIDAD','mean')
+    ).reset_index().sort_values('SEVERIDAD',ascending=False))
+    rank_pat['MODELO'] = rank_pat['DOMINIO'].apply(asignar_modelo)
+    rank_pat = rank_pat[['DOMINIO','MODELO','EVENTOS','SEVERIDAD','VEL_MAX','VEL_PROM']]
+    rank_pat.columns = ['Patente','Modelo','Eventos','Severidad (km/h acum.)','Vel. máx','Vel. prom']
+    rank_pat['Vel. máx'] = rank_pat['Vel. máx'].round(1)
+    rank_pat['Vel. prom'] = rank_pat['Vel. prom'].round(1)
+    rank_pat['Severidad (km/h acum.)'] = rank_pat['Severidad (km/h acum.)'].round(1)
+    st.dataframe(rank_pat, use_container_width=True, hide_index=True)
+
+    st.caption('Fuente: hoja Velocidades de Google Sheets · Coordenadas Lat/Lon decodificadas como formato AR (-XX,XX)')
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  PESTAÑA — DIAGNÓSTICO
 # ═══════════════════════════════════════════════════════════════════════════════
 elif pg == "🔧 Diagnóstico":
@@ -1582,8 +1708,11 @@ elif pg == "🔧 Diagnóstico":
     _diag_card('Telemetría LAD', _ok_tel, _det_tel, f'Fuente: {URL_TEL}')
     st.markdown('## 🚦 Velocidades')
     _ok_vel = not df_vel_raw.empty
-    _det_vel = f'{len(df_vel_raw):,} eventos >{LIMITE_VELOCIDAD} km/h · {df_vel_raw["DOMINIO"].nunique() if _ok_vel else 0} patentes con excesos' if _ok_vel else 'Sin eventos de velocidad'
+    _tiene_coords = _ok_vel and ('LAT' in df_vel_raw.columns) and ('LON' in df_vel_raw.columns) and df_vel_raw[['LAT','LON']].notna().any().any()
+    _det_vel = f'{len(df_vel_raw):,} eventos >{LIMITE_VELOCIDAD} km/h · {df_vel_raw["DOMINIO"].nunique() if _ok_vel else 0} patentes con excesos · Coords: {"✅" if _tiene_coords else "❌"}' if _ok_vel else 'Sin eventos de velocidad'
     _diag_card('Excesos de velocidad', _ok_vel, _det_vel, f'Fuente: {URL_VEL}')
+    if _ok_vel:
+        st.caption(f"Columnas detectadas: {list(df_vel_raw.columns)}")
     st.markdown('## 📦 Carga (BI)')
     _ok_car = not df_carga_raw.empty
     _det_car = f'{len(df_carga_raw):,} registros mensuales · {df_carga_raw["DOMINIO"].nunique() if _ok_car else 0} patentes con carga · {df_carga_raw["PESO_TON"].sum():,.1f} ton totales' if _ok_car else 'Sin datos de carga del BI'
@@ -1636,6 +1765,9 @@ elif pg == "🔧 Diagnóstico":
     st.markdown('### 📋 Muestra de telemetría')
     if not df_raw.empty:
         st.dataframe(df_raw.head(15), use_container_width=True, hide_index=True)
+    st.markdown('### 📋 Muestra de velocidades (con coords)')
+    if not df_vel_raw.empty:
+        st.dataframe(df_vel_raw.head(15), use_container_width=True, hide_index=True)
     st.markdown('### 📋 Muestra de carga')
     if not df_carga_raw.empty:
         st.dataframe(df_carga_raw.head(15), use_container_width=True, hide_index=True)
