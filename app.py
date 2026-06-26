@@ -188,13 +188,31 @@ def cargar_datos():
         return pd.DataFrame(), pd.DataFrame()
 @st.cache_data(ttl=600)
 def cargar_velocidad():
-    """Lee hoja EXCESOS DE VELOCIDAD. Estructura confirmada:
-       A:Movil | B:Fecha del evento | C:Latitud | D:Longitud | E:Ubicacion
-       F:Tipo de evento | G:Gravedad | H:Observacion | I:velocidad (km/h)
-       Números en formato AR (coma decimal: -34,43 / 92,00)."""
+    """Lee hoja EXCESOS DE VELOCIDAD. Devuelve (df, diag).
+       Estructura confirmada: A:Movil B:Fecha del evento C:Latitud D:Longitud
+       E:Ubicacion F:Tipo de evento G:Gravedad H:Observacion I:velocidad."""
+    import io
+    diag = {"url": URL_VEL, "status": None, "err": "", "raw_rows": 0,
+            "raw_cols": [], "mapped_cols": [], "tras_filtros": 0,
+            "tras_fecha": 0, "tras_velocidad_gt_limite": 0,
+            "muestra_raw": None, "muestra_proc": None,
+            "n_lat_validas": 0, "n_vel_validas": 0}
     try:
-        df = pd.read_csv(URL_VEL)
+        r = requests.get(URL_VEL, timeout=20,
+                         headers={"User-Agent": "Mozilla/5.0"})
+        diag["status"] = r.status_code
+        if r.status_code != 200:
+            diag["err"] = f"HTTP {r.status_code}"
+            return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH","LAT","LON","UBICACION"]), diag
+        # Detectar si devuelve HTML (login wall)
+        if r.text.lstrip().lower().startswith(("<!doctype","<html")):
+            diag["err"] = "Respuesta HTML (sheet no público o sin permisos)"
+            return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH","LAT","LON","UBICACION"]), diag
+        df = pd.read_csv(io.StringIO(r.text))
         df.columns = [str(c).strip() for c in df.columns]
+        diag["raw_rows"] = len(df)
+        diag["raw_cols"] = list(df.columns)
+        diag["muestra_raw"] = df.head(5).copy()
         col_map = {}
         for c in df.columns:
             cl = c.lower().strip()
@@ -207,6 +225,7 @@ def cargar_velocidad():
             elif cl == "longitud" or cl in ("lon","lng","long"):         col_map[c] = "LON"
             elif cl == "ubicacion" or "direcc" in cl:                    col_map[c] = "UBICACION"
         df = df.rename(columns=col_map)
+        diag["mapped_cols"] = list(df.columns)
         if "DOMINIO" in df.columns:
             df["DOMINIO"] = df["DOMINIO"].astype(str).str.strip().str.upper().str.replace(r"\s+","",regex=True)
         if "FECHA" in df.columns:
@@ -214,21 +233,20 @@ def cargar_velocidad():
         # Parser formato AR (coma decimal) para LAT/LON/VELOCIDAD
         def parse_ar(serie):
             s = serie.astype(str).str.strip()
-            # Si hay coma → coma es decimal; sacar puntos (separador miles) y reemplazar coma por punto
             tiene_coma = s.str.contains(",", na=False)
             s_coma = s.where(~tiene_coma, s.str.replace(".", "", regex=False).str.replace(",", ".", regex=False))
             return pd.to_numeric(s_coma, errors="coerce")
         for c in ["LAT","LON","VELOCIDAD"]:
             if c in df.columns:
                 df[c] = parse_ar(df[c])
-        # Heurística de corrección si quedó fuera de rango
         if "LAT" in df.columns:
             mask = df["LAT"].abs() > 90
             df.loc[mask, "LAT"] = df.loc[mask, "LAT"] / 100
+            diag["n_lat_validas"] = int(df["LAT"].between(-55,-21).sum())
         if "LON" in df.columns:
             mask = df["LON"].abs() > 180
             df.loc[mask, "LON"] = df.loc[mask, "LON"] / 100
-        # Fallback: detectar velocidad por heurística si no se mapeó
+        # Fallback: detectar VELOCIDAD por heurística
         if "VELOCIDAD" not in df.columns:
             for c in df.columns:
                 if c in ("DOMINIO","FECHA","LAT","LON","UBICACION","GRAVEDAD","TIPO"): continue
@@ -240,13 +258,22 @@ def cargar_velocidad():
                 except Exception:
                     continue
         if "VELOCIDAD" not in df.columns:
-            return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH","LAT","LON","UBICACION"])
-        df = df[df["VELOCIDAD"] > LIMITE_VELOCIDAD].copy()
-        df["EXCESO_KMH"] = (df["VELOCIDAD"] - LIMITE_VELOCIDAD).round(1)
-        keep = [c for c in ["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH","GRAVEDAD","TIPO","LAT","LON","UBICACION"] if c in df.columns]
-        return df[keep].dropna(subset=["DOMINIO","FECHA"]).reset_index(drop=True)
-    except Exception:
-        return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH","LAT","LON","UBICACION"])
+            diag["err"] = "No se encontró columna VELOCIDAD"
+            return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH","LAT","LON","UBICACION"]), diag
+        diag["n_vel_validas"] = int(df["VELOCIDAD"].notna().sum())
+        diag["tras_fecha"] = int(df["FECHA"].notna().sum()) if "FECHA" in df.columns else 0
+        df_post = df[df["VELOCIDAD"] > LIMITE_VELOCIDAD].copy()
+        diag["tras_velocidad_gt_limite"] = len(df_post)
+        df_post["EXCESO_KMH"] = (df_post["VELOCIDAD"] - LIMITE_VELOCIDAD).round(1)
+        keep = [c for c in ["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH","GRAVEDAD","TIPO","LAT","LON","UBICACION"] if c in df_post.columns]
+        df_post = df_post[keep].dropna(subset=["DOMINIO","FECHA"]).reset_index(drop=True)
+        diag["tras_filtros"] = len(df_post)
+        diag["muestra_proc"] = df_post.head(5).copy() if not df_post.empty else None
+        diag["err"] = "OK" if not df_post.empty else "Sin filas tras filtros"
+        return df_post, diag
+    except Exception as e:
+        diag["err"] = f"Excepción: {type(e).__name__}: {e}"
+        return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH","LAT","LON","UBICACION"]), diag
 @st.cache_data(ttl=3600)
 def cargar_carga(tractores_validos=None):
     try:
@@ -586,7 +613,7 @@ def calcular_ier(df, df_vel=None, df_carga=None, df_manejo=None):
     return agg[keep].sort_values('IER', ascending=False).reset_index(drop=True)
 with st.spinner('Cargando telemetría, velocidades y datos de carga...'):
     df_raw, _      = cargar_datos()
-    df_vel_raw     = cargar_velocidad()
+    df_vel_raw, vel_diag = cargar_velocidad()
     tractores_flota = tuple(df_raw['DOMINIO'].dropna().unique()) if (df_raw is not None and not df_raw.empty and 'DOMINIO' in df_raw.columns) else ()
     df_carga_raw    = cargar_carga(tractores_flota)
     df_viajes_raw   = cargar_viajes_todos()
@@ -1714,8 +1741,20 @@ elif pg == "🔧 Diagnóstico":
     _tiene_coords = _ok_vel and ('LAT' in df_vel_raw.columns) and ('LON' in df_vel_raw.columns) and df_vel_raw[['LAT','LON']].notna().any().any()
     _det_vel = f'{len(df_vel_raw):,} eventos >{LIMITE_VELOCIDAD} km/h · {df_vel_raw["DOMINIO"].nunique() if _ok_vel else 0} patentes con excesos · Coords: {"✅" if _tiene_coords else "❌"}' if _ok_vel else 'Sin eventos de velocidad'
     _diag_card('Excesos de velocidad', _ok_vel, _det_vel, f'Fuente: {URL_VEL}')
+    # Diagnóstico extendido velocidades
+    st.markdown(f"""
+    <div style="background:#0f172a;border:1px solid #334155;border-radius:6px;padding:8px 12px;margin:3px 0;font-size:.78rem;font-family:monospace;color:#e2e8f0;">
+    HTTP: <b>{vel_diag.get('status')}</b> · Resultado: <b>{vel_diag.get('err')}</b><br>
+    Filas raw: {vel_diag.get('raw_rows')} · Tras parse fecha (no nulas): {vel_diag.get('tras_fecha')} · Vel válidas: {vel_diag.get('n_vel_validas')} · LAT en rango AR: {vel_diag.get('n_lat_validas')}<br>
+    Tras filtro &gt;{LIMITE_VELOCIDAD} km/h: <b>{vel_diag.get('tras_velocidad_gt_limite')}</b> · Tras dropna(DOMINIO,FECHA): <b>{vel_diag.get('tras_filtros')}</b><br>
+    Columnas raw: <code>{vel_diag.get('raw_cols')}</code><br>
+    Columnas mapeadas: <code>{vel_diag.get('mapped_cols')}</code>
+    </div>""", unsafe_allow_html=True)
+    if vel_diag.get('muestra_raw') is not None:
+        st.caption('Muestra raw (primeras 5 filas tal como llegaron):')
+        st.dataframe(vel_diag['muestra_raw'], use_container_width=True, hide_index=True)
     if _ok_vel:
-        st.caption(f"Columnas detectadas: {list(df_vel_raw.columns)}")
+        st.caption(f"Columnas finales detectadas: {list(df_vel_raw.columns)}")
     st.markdown('## 📦 Carga (BI)')
     _ok_car = not df_carga_raw.empty
     _det_car = f'{len(df_carga_raw):,} registros mensuales · {df_carga_raw["DOMINIO"].nunique() if _ok_car else 0} patentes con carga · {df_carga_raw["PESO_TON"].sum():,.1f} ton totales' if _ok_car else 'Sin datos de carga del BI'
