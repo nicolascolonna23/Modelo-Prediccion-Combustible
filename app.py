@@ -28,7 +28,9 @@ BASE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR35NkYPtJrOrdYHLGUH
 GID_TEL  = "0"
 GID_VEL  = "1563993963"
 URL_TEL  = f"{BASE_URL}&gid={GID_TEL}"
-URL_VEL  = f"{BASE_URL}&gid={GID_VEL}"
+# Hoja "EXCESOS DE VELOCIDAD" en spreadsheet propio: usar gviz (funciona con compartido por link)
+VEL_SHEET_ID = "1u7cckay0IJ60bfoKk2OZo-TjCvTbH9O1wKxNFdSKDCQ"
+URL_VEL  = f"https://docs.google.com/spreadsheets/d/{VEL_SHEET_ID}/gviz/tq?tqx=out:csv&gid={GID_VEL}"
 CARGA_URL = "http://bi.sistemaexpreso.com.ar/reporte_hojas.xlsx"
 # ── DATOS MANEJO (Score Conducción) ───────────────────────────────────────
 MANEJO_SHEET_ID = "1teVcN0ejyvGbjWwWOHTmZ8I-17xyGZ0d8hxJ7dwSKm0"
@@ -186,58 +188,59 @@ def cargar_datos():
         return pd.DataFrame(), pd.DataFrame()
 @st.cache_data(ttl=600)
 def cargar_velocidad():
-    """Lee la hoja Velocidades. Estructura esperada:
-       A: Movil (patente) | B: Fecha del evento | C: Latitud | D: Longitud | E: Ubicacion
-       + columnas extra (Velocidad, Gravedad, Tipo) si existen.
-       Detección de Velocidad por nombre o por heurística (50–200 km/h)."""
+    """Lee hoja EXCESOS DE VELOCIDAD. Estructura confirmada:
+       A:Movil | B:Fecha del evento | C:Latitud | D:Longitud | E:Ubicacion
+       F:Tipo de evento | G:Gravedad | H:Observacion | I:velocidad (km/h)
+       Números en formato AR (coma decimal: -34,43 / 92,00)."""
     try:
         df = pd.read_csv(URL_VEL)
         df.columns = [str(c).strip() for c in df.columns]
         col_map = {}
         for c in df.columns:
-            cl = c.lower()
-            if   "movil" in cl or "patente" in cl or "dominio" in cl: col_map[c] = "DOMINIO"
-            elif "fecha"    in cl or "evento" in cl:                  col_map[c] = "FECHA"
-            elif "veloc"    in cl:                                    col_map[c] = "VELOCIDAD"
-            elif "gravedad" in cl:                                    col_map[c] = "GRAVEDAD"
-            elif "tipo"     in cl:                                    col_map[c] = "TIPO"
-            elif "latitud"  in cl or cl == "lat":                     col_map[c] = "LAT"
-            elif "longitud" in cl or cl in ("lon","lng","long"):      col_map[c] = "LON"
-            elif "ubicac"   in cl or "direcc" in cl:                  col_map[c] = "UBICACION"
+            cl = c.lower().strip()
+            if   cl == "movil" or "patente" in cl or "dominio" in cl:    col_map[c] = "DOMINIO"
+            elif "fecha"    in cl or "evento" in cl:                     col_map[c] = "FECHA"
+            elif cl == "velocidad" or cl.startswith("veloc"):            col_map[c] = "VELOCIDAD"
+            elif "gravedad" in cl:                                       col_map[c] = "GRAVEDAD"
+            elif cl == "tipo de evento" or cl == "tipo":                 col_map[c] = "TIPO"
+            elif cl == "latitud" or cl == "lat":                         col_map[c] = "LAT"
+            elif cl == "longitud" or cl in ("lon","lng","long"):         col_map[c] = "LON"
+            elif cl == "ubicacion" or "direcc" in cl:                    col_map[c] = "UBICACION"
         df = df.rename(columns=col_map)
         if "DOMINIO" in df.columns:
             df["DOMINIO"] = df["DOMINIO"].astype(str).str.strip().str.upper().str.replace(r"\s+","",regex=True)
         if "FECHA" in df.columns:
             df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce", dayfirst=True)
-        for c in ["LAT","LON"]:
+        # Parser formato AR (coma decimal) para LAT/LON/VELOCIDAD
+        def parse_ar(serie):
+            s = serie.astype(str).str.strip()
+            # Si hay coma → coma es decimal; sacar puntos (separador miles) y reemplazar coma por punto
+            tiene_coma = s.str.contains(",", na=False)
+            s_coma = s.where(~tiene_coma, s.str.replace(".", "", regex=False).str.replace(",", ".", regex=False))
+            return pd.to_numeric(s_coma, errors="coerce")
+        for c in ["LAT","LON","VELOCIDAD"]:
             if c in df.columns:
-                df[c] = pd.to_numeric(
-                    df[c].astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False),
-                    errors="coerce"
-                )
-                # Corrección: si por separador miles quedó tipo -3443 cuando era -34,43 → dividir por 100
-                # Heurística: si abs(LAT) > 90 o abs(LON) > 180 dividir potencias de 10
-                if c == "LAT":
-                    mask = df[c].abs() > 90
-                    df.loc[mask, c] = df.loc[mask, c] / 100
-                else:
-                    mask = df[c].abs() > 180
-                    df.loc[mask, c] = df.loc[mask, c] / 100
+                df[c] = parse_ar(df[c])
+        # Heurística de corrección si quedó fuera de rango
+        if "LAT" in df.columns:
+            mask = df["LAT"].abs() > 90
+            df.loc[mask, "LAT"] = df.loc[mask, "LAT"] / 100
+        if "LON" in df.columns:
+            mask = df["LON"].abs() > 180
+            df.loc[mask, "LON"] = df.loc[mask, "LON"] / 100
+        # Fallback: detectar velocidad por heurística si no se mapeó
         if "VELOCIDAD" not in df.columns:
             for c in df.columns:
                 if c in ("DOMINIO","FECHA","LAT","LON","UBICACION","GRAVEDAD","TIPO"): continue
                 try:
-                    serie = pd.to_numeric(df[c].astype(str).str.replace(",", ".", regex=False), errors="coerce")
+                    serie = parse_ar(df[c])
                     if serie.dropna().between(50, 200).mean() > 0.5:
-                        df = df.rename(columns={c: "VELOCIDAD"})
+                        df["VELOCIDAD"] = serie
                         break
                 except Exception:
                     continue
         if "VELOCIDAD" not in df.columns:
             return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH","LAT","LON","UBICACION"])
-        df["VELOCIDAD"] = pd.to_numeric(
-            df["VELOCIDAD"].astype(str).str.replace(",", ".", regex=False), errors="coerce"
-        )
         df = df[df["VELOCIDAD"] > LIMITE_VELOCIDAD].copy()
         df["EXCESO_KMH"] = (df["VELOCIDAD"] - LIMITE_VELOCIDAD).round(1)
         keep = [c for c in ["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH","GRAVEDAD","TIPO","LAT","LON","UBICACION"] if c in df.columns]
@@ -1534,7 +1537,7 @@ elif pg == "Datos Operativos":
             height=max(300,len(rank_tkml)*50+80),margin=dict(l=10,r=120,t=30,b=30),showlegend=False)
         st.plotly_chart(fig_rank, use_container_width=True)
     st.caption(f'Fuente: reporte_hojas.xlsx (BI Expreso) · Telemetría Google Sheets · Período {_rango_txt}')
-
+ 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  PESTAÑA — MAPA DE EXCESOS DE VELOCIDAD
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1542,7 +1545,7 @@ elif pg == "🗺️ Mapa Excesos":
     import folium
     from folium.plugins import HeatMap, MarkerCluster
     from streamlit_folium import st_folium
-
+ 
     col_logo_m, col_title_m = st.columns([1,5])
     with col_logo_m: st.image(LOGO_URL, width=130)
     with col_title_m:
@@ -1550,24 +1553,24 @@ elif pg == "🗺️ Mapa Excesos":
         <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>🗺️ Mapa de Excesos de Velocidad</div>
         <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Geolocalización de eventos &gt;{LIMITE_VELOCIDAD} km/h · {anio_sel}</div>
         </div>""", unsafe_allow_html=True)
-
+ 
     if df_vel_filtrado.empty:
         st.warning('Sin eventos de velocidad en el período filtrado.')
         st.stop()
-
+ 
     if 'LAT' not in df_vel_filtrado.columns or 'LON' not in df_vel_filtrado.columns:
         st.error("⚠️ La hoja de velocidades no tiene columnas Latitud/Longitud detectables.")
         st.caption(f"Columnas detectadas: {list(df_vel_filtrado.columns)}")
         st.stop()
-
+ 
     df_map = df_vel_filtrado.dropna(subset=['LAT','LON']).copy()
     # bbox Argentina
     df_map = df_map[(df_map['LAT'].between(-55, -21)) & (df_map['LON'].between(-74, -53))]
-
+ 
     if df_map.empty:
         st.warning('No hay eventos con coordenadas válidas dentro de Argentina.')
         st.stop()
-
+ 
     st.markdown('<div class="sec-title">Filtros del mapa</div>', unsafe_allow_html=True)
     fc1, fc2, fc3, fc4 = st.columns(4)
     with fc1:
@@ -1582,33 +1585,33 @@ elif pg == "🗺️ Mapa Excesos":
         df_map['MODELO_TMP'] = df_map['DOMINIO'].apply(asignar_modelo)
         modelos_map = sorted(df_map['MODELO_TMP'].unique().tolist())
         mod_filt = st.multiselect('Modelo', modelos_map, default=modelos_map)
-
+ 
     df_map['MODELO'] = df_map['DOMINIO'].apply(asignar_modelo)
     if pat_filt: df_map = df_map[df_map['DOMINIO'].isin(pat_filt)]
     if mod_filt: df_map = df_map[df_map['MODELO'].isin(mod_filt)]
     df_map = df_map[df_map['EXCESO_KMH'] >= sev_min]
-
+ 
     if df_map.empty:
         st.warning('Sin eventos con los filtros seleccionados.')
         st.stop()
-
+ 
     k1, k2, k3, k4 = st.columns(4)
     k1.metric('📍 Eventos mapeados', f"{len(df_map):,}")
     k2.metric('🚨 Severidad total', f"{df_map['EXCESO_KMH'].sum():.0f} km/h")
     k3.metric('⚡ Vel. máxima', f"{df_map['VELOCIDAD'].max():.0f} km/h")
     k4.metric('🚛 Patentes', f"{df_map['DOMINIO'].nunique()}")
-
+ 
     st.markdown('<br>', unsafe_allow_html=True)
-
+ 
     lat_c = df_map['LAT'].mean()
     lon_c = df_map['LON'].mean()
     m = folium.Map(location=[lat_c, lon_c], zoom_start=5, tiles='CartoDB dark_matter')
-
+ 
     if modo.startswith('🔥'):
         heat_data = [[r['LAT'], r['LON'], float(r['EXCESO_KMH'])] for _, r in df_map.iterrows()]
         HeatMap(heat_data, radius=15, blur=20, max_zoom=10,
                 gradient={0.2:'#22c55e', 0.4:'#f59e0b', 0.6:'#f97316', 0.8:'#ef4444', 1.0:'#7f1d1d'}).add_to(m)
-
+ 
     elif modo.startswith('📍'):
         cluster = MarkerCluster().add_to(m)
         for _, r in df_map.iterrows():
@@ -1625,7 +1628,7 @@ elif pg == "🗺️ Mapa Excesos":
                 popup=folium.Popup(popup, max_width=280),
                 tooltip=f"{r['DOMINIO']} · {r['VELOCIDAD']:.0f} km/h"
             ).add_to(cluster)
-
+ 
     else:
         for _, r in df_map.iterrows():
             color = '#ef4444' if r['EXCESO_KMH']>=15 else ('#f97316' if r['EXCESO_KMH']>=7 else '#f59e0b')
@@ -1642,11 +1645,11 @@ elif pg == "🗺️ Mapa Excesos":
                 popup=folium.Popup(popup, max_width=280),
                 tooltip=f"{r['DOMINIO']} · {r['VELOCIDAD']:.0f} km/h"
             ).add_to(m)
-
+ 
     st_folium(m, use_container_width=True, height=620, returned_objects=[])
-
+ 
     st.caption(f"🟡 Leve (<7) · 🟠 Medio (7–15) · 🔴 Grave (≥15 km/h sobre límite {LIMITE_VELOCIDAD})")
-
+ 
     st.divider()
     st.markdown('<div class="sec-title">🔥 Top Zonas Críticas (grilla ~11km)</div>', unsafe_allow_html=True)
     df_map['LAT_BIN'] = (df_map['LAT']*10).round()/10
@@ -1663,7 +1666,7 @@ elif pg == "🗺️ Mapa Excesos":
     hotspots = hotspots[cols_hot]
     hotspots.columns = ['Lat','Lon','Eventos','Severidad acum.','Vel. máx','Patentes'] + (['Ubicación ejemplo'] if 'UBICACION' in df_map.columns else [])
     st.dataframe(hotspots, use_container_width=True, hide_index=True)
-
+ 
     st.markdown('<div class="sec-title">🚛 Ranking por patente (eventos geolocalizados)</div>', unsafe_allow_html=True)
     rank_pat = (df_map.groupby('DOMINIO').agg(
         EVENTOS=('DOMINIO','count'),
@@ -1678,9 +1681,9 @@ elif pg == "🗺️ Mapa Excesos":
     rank_pat['Vel. prom'] = rank_pat['Vel. prom'].round(1)
     rank_pat['Severidad (km/h acum.)'] = rank_pat['Severidad (km/h acum.)'].round(1)
     st.dataframe(rank_pat, use_container_width=True, hide_index=True)
-
+ 
     st.caption('Fuente: hoja Velocidades de Google Sheets · Coordenadas Lat/Lon decodificadas como formato AR (-XX,XX)')
-
+ 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  PESTAÑA — DIAGNÓSTICO
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1774,3 +1777,6 @@ elif pg == "🔧 Diagnóstico":
     st.markdown('### 📋 Muestra de viajes')
     if not df_viajes_raw.empty:
         st.dataframe(df_viajes_raw.head(15), use_container_width=True, hide_index=True)
+ 
+
+
