@@ -217,10 +217,10 @@ def cargar_velocidad():
         for c in df.columns:
             cl = c.lower().strip()
             if   cl == "movil" or "patente" in cl or "dominio" in cl:    col_map[c] = "DOMINIO"
-            elif "fecha"    in cl or "evento" in cl:                     col_map[c] = "FECHA"
+            elif cl == "tipo de evento" or cl == "tipo":                 col_map[c] = "TIPO"
+            elif "fecha"    in cl:                                       col_map[c] = "FECHA"
             elif cl == "velocidad" or cl.startswith("veloc"):            col_map[c] = "VELOCIDAD"
             elif "gravedad" in cl:                                       col_map[c] = "GRAVEDAD"
-            elif cl == "tipo de evento" or cl == "tipo":                 col_map[c] = "TIPO"
             elif cl == "latitud" or cl == "lat":                         col_map[c] = "LAT"
             elif cl == "longitud" or cl in ("lon","lng","long"):         col_map[c] = "LON"
             elif cl == "ubicacion" or "direcc" in cl:                    col_map[c] = "UBICACION"
