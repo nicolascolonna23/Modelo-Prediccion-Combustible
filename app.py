@@ -877,6 +877,71 @@ if pg == "Dashboard Principal":
     else:
         st.info('Sin datos suficientes para calcular el IER.')
     if not df_vel_filtrado.empty and 'DOMINIO' in df_vel_filtrado.columns:
+# ══════════════════════════════════════════════════════════════════════
+        # PODIO TOP 5 IER (SCREENSHOT READY)
+        # ══════════════════════════════════════════════════════════════════════
+        st.markdown(f'<div class="sec-title">📸 Salón de la Fama: TOP 5 IER (Listo para Captura)</div>', unsafe_allow_html=True)
+        
+        if not df_ier.empty and len(df_ier) >= 5:
+            # Tomamos el top 5 y agregamos medallas
+            top5 = df_ier.head(5).copy()
+            medallas = ['🥇', '🥈', '🥉', '🏅', '🏅']
+            top5['DOMINIO_MEDALLA'] = [f"{medallas[i]}  {dom}" for i, dom in enumerate(top5['DOMINIO'])]
+            
+            # Invertimos el dataframe para que el #1 quede arriba del todo en Plotly
+            top5 = top5.iloc[::-1]
+
+            # Colores: 5to, 4to, Bronce, Plata, Oro (en ese orden porque está invertido)
+            colores_podio = ['#1e293b', '#334155', '#b45309', '#94a3b8', '#fbbf24']
+
+            fig_top5 = go.Figure(go.Bar(
+                x=top5['IER'],
+                y=top5['DOMINIO_MEDALLA'],
+                orientation='h',
+                marker=dict(
+                    color=colores_podio,
+                    line=dict(color='rgba(255,255,255,0.1)', width=1)
+                ),
+                # Texto grande adentro de la barra
+                text=[f"<b>{ier:.1f}</b>" for ier in top5['IER']],
+                textposition='inside',
+                insidetextanchor='middle',
+                textfont=dict(color='#ffffff', size=22, family="Arial Black"),
+                hoverinfo='none' # Desactivamos hover para que no moleste en la captura
+            ))
+
+            # Ajustamos el layout para que quede súper limpio tipo tarjeta
+            fig_top5.update_layout(
+                title=dict(
+                    text=f"🏆 TOP 5 FLOTA LAD - ÍNDICE DE EFICIENCIA ({anio_sel})", 
+                    font=dict(size=20, color='#f1f5f9', weight="bold"), 
+                    x=0.5, 
+                    y=0.9
+                ),
+                paper_bgcolor='#0f172a',
+                plot_bgcolor='#0f172a',
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False), # Ocultamos eje X
+                yaxis=dict(showgrid=False, tickfont=dict(size=18, weight="bold", color='#e2e8f0')),
+                margin=dict(l=20, r=20, t=70, b=20),
+                height=380,
+                bargap=0.25
+            )
+            
+            # Le agregamos una anotación chiquita a cada barra con el modelo y el L/100km real
+            for i, row in top5.reset_index().iterrows():
+                fig_top5.add_annotation(
+                    x=row['IER'] - 3, # Lo tiramos un poco a la izquierda del borde de la barra
+                    y=i,
+                    text=f"{row['MODELO']} | {row['L100KM']:.1f} L/100km",
+                    showarrow=False,
+                    font=dict(size=13, color='rgba(255,255,255,0.7)'),
+                    xanchor='right'
+                )
+
+            st.plotly_chart(fig_top5, use_container_width=True, config={'displayModeBar': False}) # Ocultamos la barrita superior de plotly
+            st.caption("Tip: Usá `Windows + Shift + S` (o `Cmd + Shift + 4` en Mac) para recortar y compartir este podio.")
+        else:
+            st.info("No hay suficientes datos procesados para armar el Top 5.")
         st.divider()
         st.markdown(f'<div class="sec-title">🚨 Ranking Severidad Velocidad >{LIMITE_VELOCIDAD} km/h — {anio_sel}</div>', unsafe_allow_html=True)
         st.caption(f'Métrica: suma total de km/h sobre el límite (frecuencia × magnitud). 5 eventos a 95 km/h (sum=35) es más grave que 10 eventos a 89 km/h (sum=10).')
