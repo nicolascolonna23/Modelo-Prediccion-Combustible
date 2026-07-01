@@ -1007,11 +1007,10 @@ if pg == "Dashboard Principal":
     if df_arreglos_raw is not None and not df_arreglos_raw.empty:
         _arr = df_arreglos_raw.copy()
         _d = st.session_state.get('desde_periodo', None); _h = st.session_state.get('hasta_periodo', None)
-        if 'MES' in _arr.columns and _arr['MES'].notna().any():
-            if _d is not None and _h is not None:
-                _arr = _arr[(_arr['MES'].isna())|((_arr['MES']>=_d)&(_arr['MES']<=_h))]
-            elif 'FECHA' in _arr.columns:
-                _arr = _arr[(_arr['MES'].isna())|(_arr['FECHA'].dt.year==anio_sel)]
+        if _d is not None and _h is not None:
+            _arr = _arr[_arr['MES'].notna() & (_arr['MES']>=_d) & (_arr['MES']<=_h)]
+        elif 'FECHA' in _arr.columns:
+            _arr = _arr[_arr['FECHA'].dt.year==anio_sel]
         if _arr.empty:
             st.info('Sin gastos de arreglos en el período seleccionado.')
         else:
