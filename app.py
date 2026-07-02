@@ -344,8 +344,6 @@ def obtener_precio_gasoil():
     return 2300.0, "valor base manual"
 @st.cache_data(ttl=600)
 def cargar_datos_manejo():
-    @st.cache_data(ttl=600)
-def cargar_datos_manejo():
     dfs = []
     diag = []
     for sheet in MANEJO_SHEETS:
