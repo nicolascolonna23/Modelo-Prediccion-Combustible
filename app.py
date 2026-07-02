@@ -344,6 +344,8 @@ def obtener_precio_gasoil():
     return 2300.0, "valor base manual"
 @st.cache_data(ttl=600)
 def cargar_datos_manejo():
+    @st.cache_data(ttl=600)
+def cargar_datos_manejo():
     dfs = []
     diag = []
     for sheet in MANEJO_SHEETS:
@@ -356,16 +358,59 @@ def cargar_datos_manejo():
                 continue
             df = pd.read_csv(url, header=0)
             df.columns = [str(c).strip() for c in df.columns]
-            score_col = next(
-                (c for c in df.columns if any(k in c.upper() for k in ['SCORE GENERAL','SCORE_GENERAL','SCORE COND','SCORE_COND'])),
-                None
-            )
-            if score_col is None or len(df.columns) < 2:
-                diag.append({'modelo': sheet['modelo'], 'gid': sheet['gid'], 'status': status, 'rows': len(df), 'col_score': '—', 'err': f'No hay columna SCORE GENERAL. Cols: {list(df.columns)[:6]}'})
+
+            def find_col(keywords):
+                for c in df.columns:
+                    cu = c.upper()
+                    if all(k.upper() in cu for k in keywords):
+                        return c
+                return None
+
+            col_mes     = find_col(['MES']) or df.columns[0]
+            col_dom     = find_col(['MATRÍCULA']) or find_col(['MATRICULA']) or find_col(['DOMINIO']) or find_col(['PATENTE'])
+            col_ahorro  = find_col(['AHORRO'])
+            col_acel    = find_col(['ACELERACIÓN']) or find_col(['ACELERACION'])
+            col_decel   = find_col(['DECELERACIÓN']) or find_col(['DECELERACION'])
+            col_inercia = find_col(['INERCIA', 'INDEX']) or find_col(['INERCIA'])
+            col_frenos  = find_col(['FRENOS'])
+            col_crucero = find_col(['CRUCERO'])
+            col_ralenti = find_col(['RALENTÍ']) or find_col(['RALENTI'])
+
+            faltan = [n for n,c in [('DOMINIO',col_dom),('AHORRO',col_ahorro),('ACEL',col_acel),
+                                     ('DECEL',col_decel),('INERCIA',col_inercia),('FRENOS',col_frenos),
+                                     ('CRUCERO',col_crucero),('RALENTI',col_ralenti)] if c is None]
+            if faltan:
+                diag.append({'modelo': sheet['modelo'], 'gid': sheet['gid'], 'status': status,
+                             'rows': len(df), 'col_score': '—',
+                             'err': f'Faltan cols: {faltan}. Cols disponibles: {list(df.columns)[:10]}'})
                 continue
-            tmp = df[[df.columns[0], df.columns[1], score_col]].copy()
-            tmp.columns = ['MES', 'DOMINIO', 'SCORE_CONDUCCION']
-            diag.append({'modelo': sheet['modelo'], 'gid': sheet['gid'], 'status': status, 'rows': len(df), 'col_score': score_col, 'err': 'OK'})
+
+            def to_num(s):
+                return pd.to_numeric(s.astype(str).str.replace(',', '.').str.replace(r'[^\d.\-]', '', regex=True), errors='coerce')
+
+            ahorro  = to_num(df[col_ahorro])
+            acel    = to_num(df[col_acel])
+            decel   = to_num(df[col_decel])
+            inercia = to_num(df[col_inercia])
+            frenos  = to_num(df[col_frenos])
+            crucero = to_num(df[col_crucero])
+            ralenti = to_num(df[col_ralenti])
+
+            score = (ahorro/10*0.30
+                     + acel/10*0.15
+                     + decel/10*0.15
+                     + inercia/10*0.15
+                     + frenos/10*0.10
+                     + crucero/10*0.10
+                     + np.maximum(0, 10 - ralenti/5) * 0.05).round(2)
+
+            tmp = pd.DataFrame({
+                'MES': df[col_mes],
+                'DOMINIO': df[col_dom],
+                'SCORE_CONDUCCION': score,
+            })
+            diag.append({'modelo': sheet['modelo'], 'gid': sheet['gid'], 'status': status,
+                         'rows': len(df), 'col_score': 'CALCULADO (fórmula 30/15/15/15/10/10/5)', 'err': 'OK'})
             dfs.append(tmp)
         except Exception as e:
             diag.append({'modelo': sheet['modelo'], 'gid': sheet['gid'], 'status': '?', 'rows': 0, 'col_score': '—', 'err': str(e)[:120]})
@@ -375,12 +420,9 @@ def cargar_datos_manejo():
     out = pd.concat(dfs, ignore_index=True)
     out['DOMINIO'] = out['DOMINIO'].astype(str).str.strip().str.upper().str.replace(r'\s+', '', regex=True)
     out['MES']     = pd.to_datetime(out['MES'], errors='coerce')
-    out['SCORE_CONDUCCION'] = (out['SCORE_CONDUCCION'].astype(str)
-                               .str.replace(',', '.').str.replace(r'[^\d.]', '', regex=True))
     out['SCORE_CONDUCCION'] = pd.to_numeric(out['SCORE_CONDUCCION'], errors='coerce')
     out = out[out['MES'].notna() & (out['DOMINIO'].str.len() > 2) & out['SCORE_CONDUCCION'].notna()]
     return out[['DOMINIO','MES','SCORE_CONDUCCION']].reset_index(drop=True), diag
-@st.cache_data(ttl=600)
 def cargar_arreglos():
     from io import StringIO
     diag = {'status': '?', 'rows': 0, 'cols': [], 'col_dom': None,
