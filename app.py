@@ -21,7 +21,7 @@ LOGO_URL    = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Predicc
 IVECO_URL   = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/S-Way-6x2-1.webp"
 SCANIA_URL  = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/2016p.png"
 STRALIS_URL = "https://raw.githubusercontent.com/nicolascolonna23/Modelo-Prediccion-Combustible/main/image.png"
-SWAY_PATENTES   = ['AH522SI', 'AH862UB', 'AH938VO', 'AH842GQ']
+SWAY_PATENTES   = ['AH522SI', 'AH861UB', 'AH938VO', 'AH842GQ']
 SCANIA_PATENTES = ['AD247MQ', 'AE423IW']
 LIMITE_VELOCIDAD = 88
 BASE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR35NkYPtJrOrdYHLGUH7GIW93s5cPAqQ0zEk5fP1c3gvErwbUW7HJ2OeWBYaBVsYKVmCf0yhLvs6eG/pub?output=csv"
@@ -1009,7 +1009,9 @@ if pg == "Dashboard Principal":
             vel_show['Severidad total (km/h acum.)']=vel_show['Severidad total (km/h acum.)'].round(1)
             st.dataframe(vel_show, use_container_width=True, hide_index=True)
     st.divider()
-    st.markdown(f'<div class="sec-title">🎯 Score Conducción vs Consumo (L/100km) — {anio_sel}</div>', unsafe_allow_html=True)
+    _d_ti = st.session_state.get('desde_periodo', None); _h_ti = st.session_state.get('hasta_periodo', None)
+_rango_ti = (f'{_d_ti}' if _d_ti==_h_ti else f'{_d_ti} a {_h_ti}') if _d_ti is not None else str(anio_sel)
+st.markdown(f'<div class="sec-title">🎯 Score Conducción vs Consumo (L/100km) — {_rango_ti}</div>', unsafe_allow_html=True)
     if not df_manejo_filtrado.empty and 'SCORE_CONDUCCION' in df_manejo_filtrado.columns and 'L100KM' in df.columns:
         _sc_man  = df_manejo_filtrado.groupby('DOMINIO')['SCORE_CONDUCCION'].mean()
         _sc_l100 = df[df['L100KM']>0].groupby('DOMINIO')['L100KM'].mean()
