@@ -1048,13 +1048,29 @@ if pg == "Dashboard Principal":
     st.markdown(f'<div class="sec-title">🔧 Gasto en Arreglos por Patente — {anio_sel}</div>', unsafe_allow_html=True)
     if df_arreglos_raw is not None and not df_arreglos_raw.empty:
         _arr = df_arreglos_raw.copy()
-        _d = st.session_state.get('desde_periodo', None); _h = st.session_state.get('hasta_periodo', None)
+        _d = st.session_state.get('desde_periodo', None)
+        _h = st.session_state.get('hasta_periodo', None)
+
+        # 1. APLICAR FILTROS DE PATENTE Y MARCA (Faltaba esto)
+        if patentes_sel:
+            _arr = _arr[_arr['DOMINIO'].isin(patentes_sel)]
+        elif marcas_sel and 'MARCA' in df_full.columns:
+            # Obtenemos qué dominios de la telemetría corresponden a las marcas seleccionadas
+            dominios_validos = df_full[df_full['MARCA'].isin(marcas_sel)]['DOMINIO'].unique()
+            _arr = _arr[_arr['DOMINIO'].isin(dominios_validos)]
+
+        # 2. APLICAR FILTRO DE FECHAS
         if _d is not None and _h is not None:
-            _arr = _arr[_arr['MES'].notna() & (_arr['MES']>=_d) & (_arr['MES']<=_h)]
+            _arr = _arr[_arr['MES'].notna() & (_arr['MES'] >= _d) & (_arr['MES'] <= _h)]
         elif 'FECHA' in _arr.columns:
-            _arr = _arr[_arr['FECHA'].dt.year==anio_sel]
+            _arr = _arr[_arr['FECHA'].dt.year == anio_sel]
+
         if _arr.empty:
-            st.info('Sin gastos de arreglos en el período seleccionado.')
+            st.info('Sin gastos de arreglos en el período o para las unidades seleccionadas.')
+        else:
+            _gp = (_arr.groupby('DOMINIO').agg(GASTO=('MONTO','sum'),N=('MONTO','count'))
+                       .reset_index().sort_values('GASTO',ascending=False))
+            # ... (el resto de tu código para graficar sigue igual)
         else:
             _gp = (_arr.groupby('DOMINIO').agg(GASTO=('MONTO','sum'),N=('MONTO','count'))
                        .reset_index().sort_values('GASTO',ascending=False))
