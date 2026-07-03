@@ -1010,8 +1010,8 @@ if pg == "Dashboard Principal":
             st.dataframe(vel_show, use_container_width=True, hide_index=True)
     st.divider()
     _d_ti = st.session_state.get('desde_periodo', None); _h_ti = st.session_state.get('hasta_periodo', None)
-_rango_ti = (f'{_d_ti}' if _d_ti==_h_ti else f'{_d_ti} a {_h_ti}') if _d_ti is not None else str(anio_sel)
-st.markdown(f'<div class="sec-title">🎯 Score Conducción vs Consumo (L/100km) — {_rango_ti}</div>', unsafe_allow_html=True)
+    _rango_ti = (f'{_d_ti}' if _d_ti==_h_ti else f'{_d_ti} a {_h_ti}') if _d_ti is not None else str(anio_sel)
+    st.markdown(f'<div class="sec-title">🎯 Score Conducción vs Consumo (L/100km) — {_rango_ti}</div>', unsafe_allow_html=True)
     if not df_manejo_filtrado.empty and 'SCORE_CONDUCCION' in df_manejo_filtrado.columns and 'L100KM' in df.columns:
         _sc_man  = df_manejo_filtrado.groupby('DOMINIO')['SCORE_CONDUCCION'].mean()
         _sc_l100 = df[df['L100KM']>0].groupby('DOMINIO')['L100KM'].mean()
