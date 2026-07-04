@@ -1040,6 +1040,16 @@ if pg == "Dashboard Principal":
                 height=460,margin=dict(l=10,r=10,t=50,b=50))
             st.plotly_chart(fig_sc, use_container_width=True)
             st.caption('Cada punto = una patente · Tendencia negativa esperada: mejor conducción → menor consumo')
+            # Transparencia: el scatter solo puede mostrar patentes que tengan score de manejo Y consumo.
+            _modelos_presentes = set(_sc['MODELO'].unique())
+            _modelos_faltantes = [m for m in ('S-Way','Scania','Stralis') if m not in _modelos_presentes]
+            if _modelos_faltantes:
+                st.caption(
+                    f'ℹ️ Solo aparecen modelos con **score de conducción cargado** en el período: '
+                    f'{", ".join(sorted(_modelos_presentes))}. '
+                    f'No se muestran {", ".join(_modelos_faltantes)} porque no tienen datos de manejo '
+                    f'(revisá la carga de las hojas en la pestaña **Diagnóstico**).'
+                )
         else:
             st.info('Se necesitan al menos 2 patentes con score de conducción y consumo para el scatter.')
     else:
@@ -1051,22 +1061,35 @@ if pg == "Dashboard Principal":
         _d = st.session_state.get('desde_periodo', None)
         _h = st.session_state.get('hasta_periodo', None)
 
-        # 1. APLICAR FILTROS DE PATENTE Y MARCA (Faltaba esto)
+        _n_raw = len(_arr)
+        # 1. APLICAR FILTROS DE PATENTE Y MARCA
         if patentes_sel:
             _arr = _arr[_arr['DOMINIO'].isin(patentes_sel)]
         elif marcas_sel and 'MARCA' in df_full.columns:
             # Obtenemos qué dominios de la telemetría corresponden a las marcas seleccionadas
             dominios_validos = df_full[df_full['MARCA'].isin(marcas_sel)]['DOMINIO'].unique()
             _arr = _arr[_arr['DOMINIO'].isin(dominios_validos)]
+        _n_pat = len(_arr)
 
         # 2. APLICAR FILTRO DE FECHAS
         if _d is not None and _h is not None:
             _arr = _arr[_arr['MES'].notna() & (_arr['MES'] >= _d) & (_arr['MES'] <= _h)]
         elif 'FECHA' in _arr.columns:
             _arr = _arr[_arr['FECHA'].dt.year == anio_sel]
+        _n_fecha = len(_arr)
 
         if _arr.empty:
-            st.info('Sin gastos de arreglos en el período o para las unidades seleccionadas.')
+            st.info('Sin gastos de arreglos para el período o las unidades seleccionadas.')
+            # Embudo de diagnóstico: muestra en qué filtro se pierden las filas
+            _mes_raw = df_arreglos_raw['MES'].dropna()
+            _rango_txt = f'{_mes_raw.min()} → {_mes_raw.max()}' if not _mes_raw.empty else 'sin fechas válidas en la planilla'
+            _periodo_txt = f'{_d} a {_h}' if (_d is not None and _h is not None) else str(anio_sel)
+            st.caption(
+                f'🔎 Diagnóstico del filtro · registros en planilla: **{_n_raw}** → tras filtro patente/marca: **{_n_pat}** '
+                f'→ tras filtro de fechas ({_periodo_txt}): **{_n_fecha}**. '
+                f'Rango de fechas cargado en la planilla de arreglos: **{_rango_txt}**. '
+                f'Si el rango no cae dentro de {_periodo_txt}, ajustá el filtro *Desde/Hasta* en la barra lateral.'
+            )
         else:
             _gp = (_arr.groupby('DOMINIO').agg(GASTO=('MONTO','sum'),N=('MONTO','count'))
                        .reset_index().sort_values('GASTO',ascending=False))
