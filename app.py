@@ -1072,10 +1072,16 @@ if pg == "Dashboard Principal":
         _n_pat = len(_arr)
 
         # 2. APLICAR FILTRO DE FECHAS
-        if _d is not None and _h is not None:
+        # Solo filtramos por fecha si la planilla realmente trae fechas válidas;
+        # si no hay fechas parseables, mostramos todos los arreglos matcheados.
+        _tiene_fechas = ('MES' in _arr.columns) and _arr['MES'].notna().any()
+        _sin_fechas = False
+        if _tiene_fechas and _d is not None and _h is not None:
             _arr = _arr[_arr['MES'].notna() & (_arr['MES'] >= _d) & (_arr['MES'] <= _h)]
-        elif 'FECHA' in _arr.columns:
+        elif _tiene_fechas and 'FECHA' in _arr.columns:
             _arr = _arr[_arr['FECHA'].dt.year == anio_sel]
+        else:
+            _sin_fechas = True
         _n_fecha = len(_arr)
 
         if _arr.empty:
@@ -1091,6 +1097,8 @@ if pg == "Dashboard Principal":
                 f'Si el rango no cae dentro de {_periodo_txt}, ajustá el filtro *Desde/Hasta* en la barra lateral.'
             )
         else:
+            if _sin_fechas:
+                st.warning('⚠️ La planilla de arreglos no tiene fechas válidas, así que se muestran **todos** los arreglos de las unidades seleccionadas (sin filtrar por el período Desde/Hasta). Cargá la columna de fecha en la planilla para poder filtrar por mes.')
             _gp = (_arr.groupby('DOMINIO').agg(GASTO=('MONTO','sum'),N=('MONTO','count'))
                        .reset_index().sort_values('GASTO',ascending=False))
             _gp['MODELO']=_gp['DOMINIO'].apply(asignar_modelo)
