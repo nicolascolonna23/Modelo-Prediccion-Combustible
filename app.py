@@ -166,7 +166,7 @@ def cargar_datos():
                 elif "EMPRESA"   in c:                                  cm[c] = "EMPRESA"
             df = df.rename(columns=cm).loc[:, ~df.rename(columns=cm).columns.duplicated()]
             if "DOMINIO" in df.columns:
-                df["DOMINIO"] = df["DOMINIO"].astype(str).str.strip().str.upper().str.replace(r"\s+", "", regex=True).upper()
+                df["DOMINIO"] = df["DOMINIO"].astype(str).str.strip().str.upper().str.replace(r"\s+", "", regex=True)
             for col in ["LITROS", "KM", "L100KM"]:
                 if col in df.columns:
                     serie = df[col]
