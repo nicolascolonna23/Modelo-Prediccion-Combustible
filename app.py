@@ -1745,6 +1745,24 @@ elif pg == "🗺️ Mapa Excesos":
  
     if df_vel_filtrado.empty:
         st.warning('Sin eventos de velocidad en el período filtrado.')
+        # Embudo de diagnóstico: muestra en qué filtro se pierden los eventos
+        _n_vraw  = len(df_vel_raw)
+        _n_vanio = len(df_vel_anio)
+        _d_v = st.session_state.get('desde_periodo', None)
+        _h_v = st.session_state.get('hasta_periodo', None)
+        _periodo_v = f'{_d_v} a {_h_v}' if (_d_v is not None and _h_v is not None) else str(anio_sel)
+        if not df_vel_raw.empty and 'FECHA' in df_vel_raw.columns and df_vel_raw['FECHA'].notna().any():
+            _fv = df_vel_raw['FECHA'].dropna()
+            _rango_v = f'{_fv.min():%Y-%m-%d} → {_fv.max():%Y-%m-%d}'
+        else:
+            _rango_v = 'sin fechas válidas en la planilla'
+        st.caption(
+            f'🔎 Diagnóstico · eventos cargados (>{LIMITE_VELOCIDAD} km/h): **{_n_vraw}** '
+            f'→ del año {anio_sel}: **{_n_vanio}** → dentro del período {_periodo_v} y patentes filtradas: **0**. '
+            f'Rango de fechas de los eventos: **{_rango_v}**. '
+            f'Si los eventos no caen en {_periodo_v}, ampliá el filtro *Desde/Hasta*; '
+            f'si son de otro año, cambiá el *Año de visualización*.'
+        )
         st.stop()
  
     if 'LAT' not in df_vel_filtrado.columns or 'LON' not in df_vel_filtrado.columns:
