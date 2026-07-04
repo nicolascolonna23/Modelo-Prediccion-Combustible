@@ -364,43 +364,56 @@ def cargar_datos_manejo():
                         return c
                 return None
 
-            col_mes     = find_col(['MES']) or df.columns[0]
-            col_dom     = find_col(['MATRÍCULA']) or find_col(['MATRICULA']) or find_col(['DOMINIO']) or find_col(['PATENTE'])
-            col_ahorro  = find_col(['AHORRO'])
-            col_acel    = find_col(['ACELERACIÓN']) or find_col(['ACELERACION'])
-            col_decel   = find_col(['DECELERACIÓN']) or find_col(['DECELERACION'])
-            col_inercia = find_col(['INERCIA', 'INDEX']) or find_col(['INERCIA'])
-            col_frenos  = find_col(['FRENOS'])
-            col_crucero = find_col(['CRUCERO'])
-            col_ralenti = find_col(['RALENTÍ']) or find_col(['RALENTI'])
-
-            faltan = [n for n,c in [('DOMINIO',col_dom),('AHORRO',col_ahorro),('ACEL',col_acel),
-                                     ('DECEL',col_decel),('INERCIA',col_inercia),('FRENOS',col_frenos),
-                                     ('CRUCERO',col_crucero),('RALENTI',col_ralenti)] if c is None]
-            if faltan:
-                diag.append({'modelo': sheet['modelo'], 'gid': sheet['gid'], 'status': status,
-                             'rows': len(df), 'col_score': '—',
-                             'err': f'Faltan cols: {faltan}. Cols disponibles: {list(df.columns)[:10]}'})
-                continue
-
             def to_num(s):
                 return pd.to_numeric(s.astype(str).str.replace(',', '.').str.replace(r'[^\d.\-]', '', regex=True), errors='coerce')
 
-            ahorro  = to_num(df[col_ahorro])
-            acel    = to_num(df[col_acel])
-            decel   = to_num(df[col_decel])
-            inercia = to_num(df[col_inercia])
-            frenos  = to_num(df[col_frenos])
-            crucero = to_num(df[col_crucero])
-            ralenti = to_num(df[col_ralenti])
+            col_mes = find_col(['MES']) or find_col(['PERÍODO']) or find_col(['PERIODO']) or find_col(['FECHA']) or df.columns[0]
+            col_dom = (find_col(['MATRÍCULA']) or find_col(['MATRICULA']) or find_col(['DOMINIO'])
+                       or find_col(['PATENTE']) or find_col(['PLACA']) or find_col(['MÓVIL'])
+                       or find_col(['MOVIL']) or find_col(['INTERNO']) or find_col(['UNIDAD'])
+                       or find_col(['VEHÍCULO']) or find_col(['VEHICULO']))
+            if col_dom is None:
+                diag.append({'modelo': sheet['modelo'], 'gid': sheet['gid'], 'status': status,
+                             'rows': len(df), 'col_score': '—',
+                             'err': f'No se detectó columna de patente. Cols: {list(df.columns)[:12]}'})
+                continue
 
-            score = (ahorro/10*0.30
-                     + acel/10*0.15
-                     + decel/10*0.15
-                     + inercia/10*0.15
-                     + frenos/10*0.10
-                     + crucero/10*0.10
-                     + np.maximum(0, 10 - ralenti/5) * 0.05).round(2)
+            # Preferimos la columna "SCORE GENERAL" ya calculada en la planilla.
+            col_score_gen = (find_col(['SCORE', 'GENERAL']) or find_col(['SCORE'])
+                             or find_col(['PUNTAJE']) or find_col(['PUNTUACIÓN']) or find_col(['PUNTUACION'])
+                             or find_col(['CALIFICACIÓN']) or find_col(['CALIFICACION']) or find_col(['NOTA']))
+            if col_score_gen is not None:
+                score = to_num(df[col_score_gen]).round(2)
+                col_desc = f'SCORE GENERAL (col «{col_score_gen}» de la planilla)'
+            else:
+                # Respaldo: calcular con la fórmula ponderada si existen las columnas de detalle.
+                col_ahorro  = find_col(['AHORRO'])
+                col_acel    = find_col(['ACELERACIÓN']) or find_col(['ACELERACION'])
+                col_decel   = find_col(['DECELERACIÓN']) or find_col(['DECELERACION'])
+                col_inercia = find_col(['INERCIA', 'INDEX']) or find_col(['INERCIA'])
+                col_frenos  = find_col(['FRENOS'])
+                col_crucero = find_col(['CRUCERO'])
+                col_ralenti = find_col(['RALENTÍ']) or find_col(['RALENTI'])
+                faltan = [n for n,c in [('AHORRO',col_ahorro),('ACEL',col_acel),
+                                         ('DECEL',col_decel),('INERCIA',col_inercia),('FRENOS',col_frenos),
+                                         ('CRUCERO',col_crucero),('RALENTI',col_ralenti)] if c is None]
+                if faltan:
+                    diag.append({'modelo': sheet['modelo'], 'gid': sheet['gid'], 'status': status,
+                                 'rows': len(df), 'col_score': '—',
+                                 'err': f'Sin columna SCORE GENERAL y faltan cols para calcularlo: {faltan}. Cols: {list(df.columns)[:12]}'})
+                    continue
+                ahorro  = to_num(df[col_ahorro]);  acel    = to_num(df[col_acel])
+                decel   = to_num(df[col_decel]);   inercia = to_num(df[col_inercia])
+                frenos  = to_num(df[col_frenos]);  crucero = to_num(df[col_crucero])
+                ralenti = to_num(df[col_ralenti])
+                score = (ahorro/10*0.30
+                         + acel/10*0.15
+                         + decel/10*0.15
+                         + inercia/10*0.15
+                         + frenos/10*0.10
+                         + crucero/10*0.10
+                         + np.maximum(0, 10 - ralenti/5) * 0.05).round(2)
+                col_desc = 'CALCULADO (respaldo, fórmula 30/15/15/15/10/10/5)'
 
             tmp = pd.DataFrame({
                 'MES': df[col_mes],
@@ -408,7 +421,7 @@ def cargar_datos_manejo():
                 'SCORE_CONDUCCION': score,
             })
             diag.append({'modelo': sheet['modelo'], 'gid': sheet['gid'], 'status': status,
-                         'rows': len(df), 'col_score': 'CALCULADO (fórmula 30/15/15/15/10/10/5)', 'err': 'OK'})
+                         'rows': len(df), 'col_score': col_desc, 'err': 'OK'})
             dfs.append(tmp)
         except Exception as e:
             diag.append({'modelo': sheet['modelo'], 'gid': sheet['gid'], 'status': '?', 'rows': 0, 'col_score': '—', 'err': str(e)[:120]})
