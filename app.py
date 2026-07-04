@@ -1070,10 +1070,6 @@ if pg == "Dashboard Principal":
         else:
             _gp = (_arr.groupby('DOMINIO').agg(GASTO=('MONTO','sum'),N=('MONTO','count'))
                        .reset_index().sort_values('GASTO',ascending=False))
-            # ... (el resto de tu código para graficar sigue igual)
-        else:
-            _gp = (_arr.groupby('DOMINIO').agg(GASTO=('MONTO','sum'),N=('MONTO','count'))
-                       .reset_index().sort_values('GASTO',ascending=False))
             _gp['MODELO']=_gp['DOMINIO'].apply(asignar_modelo)
             _tot=_gp['GASTO'].sum()
             a1,a2,a3=st.columns(3)
