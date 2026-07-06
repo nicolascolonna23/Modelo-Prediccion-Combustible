@@ -888,6 +888,45 @@ if pg == "Dashboard Principal":
                 if c in ier_show.columns: ier_show[c]=ier_show[c].round(3)
             if 'KM total' in ier_show.columns: ier_show['KM total']=ier_show['KM total'].apply(lambda x:f'{x:,.0f}')
             st.dataframe(ier_show, use_container_width=True, hide_index=True)
+            with st.expander('📦 Ver datos base de cálculo (KM, Litros, Peso, kg/km, ton·km/L)'):
+            _calc = df[df['L100KM']>0].groupby('DOMINIO').agg(
+                KM=('KM','sum'), LITROS=('LITROS','sum'), L100KM=('L100KM','mean')
+            ).reset_index()
+            _calc['MODELO'] = _calc['DOMINIO'].apply(asignar_modelo)
+            if df_carga_raw is not None and not df_carga_raw.empty:
+                _d_c = st.session_state.get('desde_periodo', None)
+                _h_c = st.session_state.get('hasta_periodo', None)
+                if _d_c is not None and _h_c is not None:
+                    _cg = df_carga_raw[(df_carga_raw['MES']>=_d_c)&(df_carga_raw['MES']<=_h_c)].groupby('DOMINIO')['PESO_TON'].sum().reset_index()
+                else:
+                    _cg = df_carga_raw[df_carga_raw['MES'].apply(lambda p:p.year)==anio_sel].groupby('DOMINIO')['PESO_TON'].sum().reset_index()
+                _calc = _calc.merge(_cg, on='DOMINIO', how='left')
+            else:
+                _calc['PESO_TON'] = 0.0
+            _calc['PESO_TON'] = _calc['PESO_TON'].fillna(0)
+            _calc['KG_KM'] = np.where(_calc['KM']>0, _calc['PESO_TON']*1000/_calc['KM'], 0).round(2)
+            _calc['TONKML'] = np.where((_calc['PESO_TON']>0)&(_calc['LITROS']>0), (_calc['PESO_TON']*_calc['KM'])/_calc['LITROS'], 0).round(2)
+            if not df_manejo_filtrado.empty and 'SCORE_CONDUCCION' in df_manejo_filtrado.columns:
+                _sc = df_manejo_filtrado.groupby('DOMINIO')['SCORE_CONDUCCION'].mean().round(2).reset_index()
+                _calc = _calc.merge(_sc, on='DOMINIO', how='left')
+            else:
+                _calc['SCORE_CONDUCCION'] = np.nan
+            if not df_vel_filtrado.empty:
+                _sv = df_vel_filtrado.groupby('DOMINIO').agg(EXCESOS=('DOMINIO','count'),SEVERIDAD=('EXCESO_KMH','sum')).reset_index()
+                _calc = _calc.merge(_sv, on='DOMINIO', how='left')
+            else:
+                _calc['EXCESOS'] = 0; _calc['SEVERIDAD'] = 0
+            _calc['EXCESOS'] = _calc['EXCESOS'].fillna(0).astype(int)
+            _calc['SEVERIDAD'] = _calc['SEVERIDAD'].fillna(0).round(1)
+            _calc = _calc.sort_values('DOMINIO')
+            _calc_show = _calc[['DOMINIO','MODELO','KM','LITROS','L100KM','PESO_TON','KG_KM','TONKML','SCORE_CONDUCCION','EXCESOS','SEVERIDAD']].copy()
+            _calc_show.columns = ['Patente','Modelo','KM','Litros','L/100km','Peso (ton)','kg/km','ton·km/L','Score Cond.','Excesos','Severidad']
+            _calc_show['KM'] = _calc_show['KM'].apply(lambda x:f'{x:,.0f}')
+            _calc_show['Litros'] = _calc_show['Litros'].apply(lambda x:f'{x:,.0f}')
+            _calc_show['L/100km'] = _calc_show['L/100km'].round(2)
+            _calc_show['Peso (ton)'] = _calc_show['Peso (ton)'].round(1)
+            st.dataframe(_calc_show, use_container_width=True, hide_index=True)
+            st.caption('Estos son los datos que alimentan el cálculo del IER. kg/km = peso×1000/km · ton·km/L = peso×km/litros')
     else:
         st.info('Sin datos suficientes para calcular el IER.')
     if not df_vel_filtrado.empty and 'DOMINIO' in df_vel_filtrado.columns:
