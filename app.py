@@ -888,7 +888,7 @@ if pg == "Dashboard Principal":
                 if c in ier_show.columns: ier_show[c]=ier_show[c].round(3)
             if 'KM total' in ier_show.columns: ier_show['KM total']=ier_show['KM total'].apply(lambda x:f'{x:,.0f}')
             st.dataframe(ier_show, use_container_width=True, hide_index=True)
-            with st.expander('📦 Ver datos base de cálculo (KM, Litros, Peso, kg/km, ton·km/L)'):
+        with st.expander('📦 Ver datos base de cálculo (KM, Litros, Peso, kg/km, ton·km/L)'):
             _calc = df[df['L100KM']>0].groupby('DOMINIO').agg(
                 KM=('KM','sum'), LITROS=('LITROS','sum'), L100KM=('L100KM','mean')
             ).reset_index()
