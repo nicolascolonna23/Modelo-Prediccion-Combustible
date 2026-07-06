@@ -364,76 +364,37 @@ def cargar_datos_manejo():
                         return c
                 return None
 
-            def to_num(s):
-                return pd.to_numeric(s.astype(str).str.replace(',', '.').str.replace(r'[^\d.\-]', '', regex=True), errors='coerce')
+            col_mes   = find_col(['MES']) or df.columns[0]
+            col_dom   = find_col(['DOMINIO']) or find_col(['MATRÍCULA']) or find_col(['MATRICULA']) or find_col(['PATENTE'])
+            col_score = find_col(['SCORE GENERAL']) or find_col(['SCORE_GENERAL']) or find_col(['SCOREGENERAL'])
 
-            col_mes = find_col(['MES']) or find_col(['PERÍODO']) or find_col(['PERIODO']) or find_col(['FECHA']) or df.columns[0]
-            col_dom = (find_col(['MATRÍCULA']) or find_col(['MATRICULA']) or find_col(['DOMINIO'])
-                       or find_col(['PATENTE']) or find_col(['PLACA']) or find_col(['MÓVIL'])
-                       or find_col(['MOVIL']) or find_col(['INTERNO']) or find_col(['UNIDAD'])
-                       or find_col(['VEHÍCULO']) or find_col(['VEHICULO']))
-            if col_dom is None:
+            if col_dom is None or col_score is None:
                 diag.append({'modelo': sheet['modelo'], 'gid': sheet['gid'], 'status': status,
-                             'rows': len(df), 'col_score': '—',
-                             'err': f'No se detectó columna de patente. Cols: {list(df.columns)[:12]}'})
+                             'rows': len(df), 'col_score': col_score or '—',
+                             'err': f'Falta DOMINIO o SCORE GENERAL. Cols: {list(df.columns)[:10]}'})
                 continue
-
-            # Preferimos la columna "SCORE GENERAL" ya calculada en la planilla.
-            col_score_gen = (find_col(['SCORE', 'GENERAL']) or find_col(['SCORE'])
-                             or find_col(['PUNTAJE']) or find_col(['PUNTUACIÓN']) or find_col(['PUNTUACION'])
-                             or find_col(['CALIFICACIÓN']) or find_col(['CALIFICACION']) or find_col(['NOTA']))
-            if col_score_gen is not None:
-                score = to_num(df[col_score_gen]).round(2)
-                col_desc = f'SCORE GENERAL (col «{col_score_gen}» de la planilla)'
-            else:
-                # Respaldo: calcular con la fórmula ponderada si existen las columnas de detalle.
-                col_ahorro  = find_col(['AHORRO'])
-                col_acel    = find_col(['ACELERACIÓN']) or find_col(['ACELERACION'])
-                col_decel   = find_col(['DECELERACIÓN']) or find_col(['DECELERACION'])
-                col_inercia = find_col(['INERCIA', 'INDEX']) or find_col(['INERCIA'])
-                col_frenos  = find_col(['FRENOS'])
-                col_crucero = find_col(['CRUCERO'])
-                col_ralenti = find_col(['RALENTÍ']) or find_col(['RALENTI'])
-                faltan = [n for n,c in [('AHORRO',col_ahorro),('ACEL',col_acel),
-                                         ('DECEL',col_decel),('INERCIA',col_inercia),('FRENOS',col_frenos),
-                                         ('CRUCERO',col_crucero),('RALENTI',col_ralenti)] if c is None]
-                if faltan:
-                    diag.append({'modelo': sheet['modelo'], 'gid': sheet['gid'], 'status': status,
-                                 'rows': len(df), 'col_score': '—',
-                                 'err': f'Sin columna SCORE GENERAL y faltan cols para calcularlo: {faltan}. Cols: {list(df.columns)[:12]}'})
-                    continue
-                ahorro  = to_num(df[col_ahorro]);  acel    = to_num(df[col_acel])
-                decel   = to_num(df[col_decel]);   inercia = to_num(df[col_inercia])
-                frenos  = to_num(df[col_frenos]);  crucero = to_num(df[col_crucero])
-                ralenti = to_num(df[col_ralenti])
-                score = (ahorro/10*0.30
-                         + acel/10*0.15
-                         + decel/10*0.15
-                         + inercia/10*0.15
-                         + frenos/10*0.10
-                         + crucero/10*0.10
-                         + np.maximum(0, 10 - ralenti/5) * 0.05).round(2)
-                col_desc = 'CALCULADO (respaldo, fórmula 30/15/15/15/10/10/5)'
 
             tmp = pd.DataFrame({
                 'MES': df[col_mes],
                 'DOMINIO': df[col_dom],
-                'SCORE_CONDUCCION': score,
+                'SCORE_CONDUCCION': pd.to_numeric(
+                    df[col_score].astype(str).str.replace(',', '.').str.replace(r'[^\d.\-]', '', regex=True),
+                    errors='coerce'),
             })
             diag.append({'modelo': sheet['modelo'], 'gid': sheet['gid'], 'status': status,
-                         'rows': len(df), 'col_score': col_desc, 'err': 'OK'})
+                         'rows': len(df), 'col_score': col_score, 'err': 'OK'})
             dfs.append(tmp)
         except Exception as e:
             diag.append({'modelo': sheet['modelo'], 'gid': sheet['gid'], 'status': '?', 'rows': 0, 'col_score': '—', 'err': str(e)[:120]})
             continue
     if not dfs:
-        return pd.DataFrame(columns=['DOMINIO','MES','SCORE_CONDUCCION']), diag
+        return pd.DataFrame(columns=['DOMINIO', 'MES', 'SCORE_CONDUCCION']), diag
     out = pd.concat(dfs, ignore_index=True)
     out['DOMINIO'] = out['DOMINIO'].astype(str).str.strip().str.upper().str.replace(r'\s+', '', regex=True)
     out['MES']     = pd.to_datetime(out['MES'], errors='coerce')
     out['SCORE_CONDUCCION'] = pd.to_numeric(out['SCORE_CONDUCCION'], errors='coerce')
     out = out[out['MES'].notna() & (out['DOMINIO'].str.len() > 2) & out['SCORE_CONDUCCION'].notna()]
-    return out[['DOMINIO','MES','SCORE_CONDUCCION']].reset_index(drop=True), diag
+    return out[['DOMINIO', 'MES', 'SCORE_CONDUCCION']].reset_index(drop=True), diag
 def cargar_arreglos():
     from io import StringIO
     diag = {'status': '?', 'rows': 0, 'cols': [], 'col_dom': None,
