@@ -391,7 +391,7 @@ def cargar_datos_manejo():
         return pd.DataFrame(columns=['DOMINIO', 'MES', 'SCORE_CONDUCCION']), diag
     out = pd.concat(dfs, ignore_index=True)
     out['DOMINIO'] = out['DOMINIO'].astype(str).str.strip().str.upper().str.replace(r'\s+', '', regex=True)
-    out['MES']     = pd.to_datetime(out['MES'], errors='coerce')
+    out['MES']     = pd.to_datetime(out['MES'], errors='coerce', dayfirst=True)
     out['SCORE_CONDUCCION'] = pd.to_numeric(out['SCORE_CONDUCCION'], errors='coerce')
     out = out[out['MES'].notna() & (out['DOMINIO'].str.len() > 2) & out['SCORE_CONDUCCION'].notna()]
     return out[['DOMINIO', 'MES', 'SCORE_CONDUCCION']].reset_index(drop=True), diag
