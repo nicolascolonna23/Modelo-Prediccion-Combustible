@@ -365,7 +365,7 @@ def cargar_datos_manejo():
                 return None
 
             col_mes   = find_col(['MES']) or df.columns[0]
-            col_dom   = find_col(['DOMINIO']) or find_col(['MATRÍCULA']) or find_col(['MATRICULA']) or find_col(['PATENTE'])
+            col_dom = find_col(['DOMINIO']) or find_col(['MATRÍCULA']) or find_col(['MATRICULA']) or find_col(['PATENTE']) or find_col(['VEHICULO']) or find_col(['VEHÍCULO']) or find_col(['UNIDAD']) or find_col(['MOVIL']) or find_col(['MÓVIL'])
             col_score = find_col(['SCORE GENERAL']) or find_col(['SCORE_GENERAL']) or find_col(['SCOREGENERAL'])
 
             if col_dom is None or col_score is None:
