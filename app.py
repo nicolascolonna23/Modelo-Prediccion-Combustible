@@ -146,6 +146,13 @@ pg = st.sidebar.radio(
 )
 st.sidebar.markdown("---")
 st.sidebar.image(LOGO_URL, width=160)
+def normalizar_patente(valor):
+    """Normaliza dominios: upper + solo alfanuméricos.
+       Elimina espacios normales, \\xa0, \\u200b y cualquier
+       caracter invisible que sobreviva a un str.strip()/\\s+."""
+    import re
+    s = str(valor).strip().upper()
+    return re.sub(r'[^A-Z0-9]', '', s)
 @st.cache_data(ttl=600)
 def cargar_datos():
     try:
@@ -166,7 +173,7 @@ def cargar_datos():
                 elif "EMPRESA"   in c:                                  cm[c] = "EMPRESA"
             df = df.rename(columns=cm).loc[:, ~df.rename(columns=cm).columns.duplicated()]
             if "DOMINIO" in df.columns:
-                df["DOMINIO"] = df["DOMINIO"].astype(str).str.strip().str.upper().str.replace(r"\s+", "", regex=True)
+                df["DOMINIO"] = df["DOMINIO"].apply(normalizar_patente)
             for col in ["LITROS", "KM", "L100KM"]:
                 if col in df.columns:
                     serie = df[col]
@@ -227,7 +234,7 @@ def cargar_velocidad():
         df = df.rename(columns=col_map)
         diag["mapped_cols"] = list(df.columns)
         if "DOMINIO" in df.columns:
-            df["DOMINIO"] = df["DOMINIO"].astype(str).str.strip().str.upper().str.replace(r"\s+","",regex=True)
+            df["DOMINIO"] = df["DOMINIO"].apply(normalizar_patente)
         if "FECHA" in df.columns:
             df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce", dayfirst=True)
         # Parser formato AR (coma decimal) para LAT/LON/VELOCIDAD
@@ -292,7 +299,7 @@ def cargar_carga(tractores_validos=None):
         df[col_peso]  = pd.to_numeric(df[col_peso],  errors='coerce').fillna(0)
         df = df[(df[col_peso] > 0) & df[col_fecha].notna()].copy()
         def norm_pat(p):
-            return re.sub(r'\s+', '', str(p).strip().upper())
+            return normalizar_patente(p)
         tractores_set = set()
         if tractores_validos is not None:
             tractores_set = {norm_pat(t) for t in tractores_validos if pd.notna(t)}
@@ -331,7 +338,7 @@ def cargar_viajes_todos():
         df[col_peso]  = pd.to_numeric(df[col_peso], errors='coerce').fillna(0)
         df = df[df[col_fecha].notna()].copy()
         def norm_pat(p):
-            return re.sub(r'\s+', '', str(p).strip().upper())
+            return normalizar_patente(p)
         df['DOMINIO']   = df[col_unid].astype(str).str.split(',').str[0].apply(norm_pat)
         df['MES']       = df[col_fecha].dt.to_period('M')
         df['PESO_TON']  = df[col_peso] / 1000.0
@@ -356,24 +363,20 @@ def cargar_datos_manejo():
                 continue
             df = pd.read_csv(url, header=0)
             df.columns = [str(c).strip() for c in df.columns]
-
             def find_col(keywords):
                 for c in df.columns:
                     cu = c.upper()
                     if all(k.upper() in cu for k in keywords):
                         return c
                 return None
-
             col_mes   = find_col(['MES']) or df.columns[0]
             col_dom = find_col(['DOMINIO']) or find_col(['MATRÍCULA']) or find_col(['MATRICULA']) or find_col(['PATENTE']) or find_col(['VEHICULO']) or find_col(['VEHÍCULO']) or find_col(['UNIDAD']) or find_col(['MOVIL']) or find_col(['MÓVIL'])
             col_score = find_col(['SCORE GENERAL']) or find_col(['SCORE_GENERAL']) or find_col(['SCOREGENERAL'])
-
             if col_dom is None or col_score is None:
                 diag.append({'modelo': sheet['modelo'], 'gid': sheet['gid'], 'status': status,
                              'rows': len(df), 'col_score': col_score or '—',
                              'err': f'Falta DOMINIO o SCORE GENERAL. Cols: {list(df.columns)[:10]}'})
                 continue
-
             tmp = pd.DataFrame({
                 'MES': df[col_mes],
                 'DOMINIO': df[col_dom],
@@ -390,7 +393,7 @@ def cargar_datos_manejo():
     if not dfs:
         return pd.DataFrame(columns=['DOMINIO', 'MES', 'SCORE_CONDUCCION']), diag
     out = pd.concat(dfs, ignore_index=True)
-    out['DOMINIO'] = out['DOMINIO'].astype(str).str.strip().str.upper().str.replace(r'\s+', '', regex=True)
+    out['DOMINIO'] = out['DOMINIO'].apply(normalizar_patente)
     out['MES']     = pd.to_datetime(out['MES'], errors='coerce', dayfirst=True)
     out['SCORE_CONDUCCION'] = pd.to_numeric(out['SCORE_CONDUCCION'], errors='coerce')
     out = out[out['MES'].notna() & (out['DOMINIO'].str.len() > 2) & out['SCORE_CONDUCCION'].notna()]
@@ -430,7 +433,7 @@ def cargar_arreglos():
                 s = s.replace(',', '.')
             return pd.to_numeric(s, errors='coerce')
         out = pd.DataFrame()
-        out['DOMINIO']     = df[col_dom].astype(str).str.strip().str.upper().str.replace(r'\s+', '', regex=True)
+        out['DOMINIO']     = df[col_dom].apply(normalizar_patente)
         out['MONTO']       = df[col_monto].apply(parse_monto)
         out['FECHA']       = pd.to_datetime(df[col_fecha], errors='coerce', dayfirst=True) if col_fecha else pd.NaT
         out['DESCRIPCION'] = df[col_desc].astype(str).str.strip() if col_desc else ''
@@ -491,7 +494,7 @@ def cargar_gasto_combustible():
         diag['err'] = str(e)[:160]
         return np.nan, None, 0, diag
 def asignar_modelo(dominio):
-    d = str(dominio).strip().upper()
+    d = normalizar_patente(dominio)
     if d in SWAY_PATENTES:   return 'S-Way'
     if d in SCANIA_PATENTES: return 'Scania'
     return 'Stralis'
@@ -930,23 +933,21 @@ if pg == "Dashboard Principal":
     else:
         st.info('Sin datos suficientes para calcular el IER.')
     if not df_vel_filtrado.empty and 'DOMINIO' in df_vel_filtrado.columns:
-# ══════════════════════════════════════════════════════════════════════
+        # ══════════════════════════════════════════════════════════════════════
         # PODIO TOP 5 IER (SCREENSHOT READY)
         # ══════════════════════════════════════════════════════════════════════
         st.markdown(f'<div class="sec-title">📸 Salón de la Fama: TOP 5 IER (Listo para Captura)</div>', unsafe_allow_html=True)
-        
+
         if not df_ier.empty and len(df_ier) >= 5:
             # Tomamos el top 5 y agregamos medallas
             top5 = df_ier.head(5).copy()
             medallas = ['🥇', '🥈', '🥉', '🏅', '🏅']
             top5['DOMINIO_MEDALLA'] = [f"{medallas[i]}  {dom}" for i, dom in enumerate(top5['DOMINIO'])]
-            
+
             # Invertimos el dataframe para que el #1 quede arriba del todo en Plotly
             top5 = top5.iloc[::-1]
-
             # Colores: 5to, 4to, Bronce, Plata, Oro (en ese orden porque está invertido)
             colores_podio = ['#1e293b', '#334155', '#b45309', '#94a3b8', '#fbbf24']
-
             fig_top5 = go.Figure(go.Bar(
                 x=top5['IER'],
                 y=top5['DOMINIO_MEDALLA'],
@@ -962,13 +963,12 @@ if pg == "Dashboard Principal":
                 textfont=dict(color='#ffffff', size=22, family="Arial Black"),
                 hoverinfo='none' # Desactivamos hover para que no moleste en la captura
             ))
-
             # Ajustamos el layout para que quede súper limpio tipo tarjeta
             fig_top5.update_layout(
                 title=dict(
-                    text=f"🏆 TOP 5 FLOTA LAD - ÍNDICE DE EFICIENCIA ({anio_sel})", 
-                    font=dict(size=20, color='#f1f5f9', weight="bold"), 
-                    x=0.5, 
+                    text=f"🏆 TOP 5 FLOTA LAD - ÍNDICE DE EFICIENCIA ({anio_sel})",
+                    font=dict(size=20, color='#f1f5f9', weight="bold"),
+                    x=0.5,
                     y=0.9
                 ),
                 paper_bgcolor='#0f172a',
@@ -979,7 +979,7 @@ if pg == "Dashboard Principal":
                 height=380,
                 bargap=0.25
             )
-            
+
             # Le agregamos una anotación chiquita a cada barra con el modelo y el L/100km real
             for i, row in top5.reset_index().iterrows():
                 fig_top5.add_annotation(
@@ -990,7 +990,6 @@ if pg == "Dashboard Principal":
                     font=dict(size=13, color='rgba(255,255,255,0.7)'),
                     xanchor='right'
                 )
-
             st.plotly_chart(fig_top5, use_container_width=True, config={'displayModeBar': False}) # Ocultamos la barrita superior de plotly
             st.caption("Tip: Usá `Windows + Shift + S` (o `Cmd + Shift + 4` en Mac) para recortar y compartir este podio.")
         else:
@@ -1073,7 +1072,6 @@ if pg == "Dashboard Principal":
         _arr = df_arreglos_raw.copy()
         _d = st.session_state.get('desde_periodo', None)
         _h = st.session_state.get('hasta_periodo', None)
-
         _n_raw = len(_arr)
         # 1. APLICAR FILTROS DE PATENTE Y MARCA
         if patentes_sel:
@@ -1083,7 +1081,6 @@ if pg == "Dashboard Principal":
             dominios_validos = df_full[df_full['MARCA'].isin(marcas_sel)]['DOMINIO'].unique()
             _arr = _arr[_arr['DOMINIO'].isin(dominios_validos)]
         _n_pat = len(_arr)
-
         # 2. APLICAR FILTRO DE FECHAS
         # Solo filtramos por fecha si la planilla realmente trae fechas válidas;
         # si no hay fechas parseables, mostramos todos los arreglos matcheados.
@@ -1096,7 +1093,6 @@ if pg == "Dashboard Principal":
         else:
             _sin_fechas = True
         _n_fecha = len(_arr)
-
         if _arr.empty:
             st.info('Sin gastos de arreglos para el período o las unidades seleccionadas.')
             # Embudo de diagnóstico: muestra en qué filtro se pierden las filas
@@ -1726,7 +1722,7 @@ elif pg == "Datos Operativos":
             height=max(300,len(rank_tkml)*50+80),margin=dict(l=10,r=120,t=30,b=30),showlegend=False)
         st.plotly_chart(fig_rank, use_container_width=True)
     st.caption(f'Fuente: reporte_hojas.xlsx (BI Expreso) · Telemetría Google Sheets · Período {_rango_txt}')
- 
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  PESTAÑA — MAPA DE EXCESOS DE VELOCIDAD
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1734,7 +1730,7 @@ elif pg == "🗺️ Mapa Excesos":
     import folium
     from folium.plugins import HeatMap, MarkerCluster
     from streamlit_folium import st_folium
- 
+
     col_logo_m, col_title_m = st.columns([1,5])
     with col_logo_m: st.image(LOGO_URL, width=130)
     with col_title_m:
@@ -1742,7 +1738,7 @@ elif pg == "🗺️ Mapa Excesos":
         <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>🗺️ Mapa de Excesos de Velocidad</div>
         <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Geolocalización de eventos &gt;{LIMITE_VELOCIDAD} km/h · {anio_sel}</div>
         </div>""", unsafe_allow_html=True)
- 
+
     if df_vel_filtrado.empty:
         st.warning('Sin eventos de velocidad en el período filtrado.')
         # Embudo de diagnóstico: muestra en qué filtro se pierden los eventos
@@ -1764,20 +1760,20 @@ elif pg == "🗺️ Mapa Excesos":
             f'si son de otro año, cambiá el *Año de visualización*.'
         )
         st.stop()
- 
+
     if 'LAT' not in df_vel_filtrado.columns or 'LON' not in df_vel_filtrado.columns:
         st.error("⚠️ La hoja de velocidades no tiene columnas Latitud/Longitud detectables.")
         st.caption(f"Columnas detectadas: {list(df_vel_filtrado.columns)}")
         st.stop()
- 
+
     df_map = df_vel_filtrado.dropna(subset=['LAT','LON']).copy()
     # bbox Argentina
     df_map = df_map[(df_map['LAT'].between(-55, -21)) & (df_map['LON'].between(-74, -53))]
- 
+
     if df_map.empty:
         st.warning('No hay eventos con coordenadas válidas dentro de Argentina.')
         st.stop()
- 
+
     st.markdown('<div class="sec-title">Filtros del mapa</div>', unsafe_allow_html=True)
     fc1, fc2, fc3, fc4 = st.columns(4)
     with fc1:
@@ -1792,33 +1788,33 @@ elif pg == "🗺️ Mapa Excesos":
         df_map['MODELO_TMP'] = df_map['DOMINIO'].apply(asignar_modelo)
         modelos_map = sorted(df_map['MODELO_TMP'].unique().tolist())
         mod_filt = st.multiselect('Modelo', modelos_map, default=modelos_map)
- 
+
     df_map['MODELO'] = df_map['DOMINIO'].apply(asignar_modelo)
     if pat_filt: df_map = df_map[df_map['DOMINIO'].isin(pat_filt)]
     if mod_filt: df_map = df_map[df_map['MODELO'].isin(mod_filt)]
     df_map = df_map[df_map['EXCESO_KMH'] >= sev_min]
- 
+
     if df_map.empty:
         st.warning('Sin eventos con los filtros seleccionados.')
         st.stop()
- 
+
     k1, k2, k3, k4 = st.columns(4)
     k1.metric('📍 Eventos mapeados', f"{len(df_map):,}")
     k2.metric('🚨 Severidad total', f"{df_map['EXCESO_KMH'].sum():.0f} km/h")
     k3.metric('⚡ Vel. máxima', f"{df_map['VELOCIDAD'].max():.0f} km/h")
     k4.metric('🚛 Patentes', f"{df_map['DOMINIO'].nunique()}")
- 
+
     st.markdown('<br>', unsafe_allow_html=True)
- 
+
     lat_c = df_map['LAT'].mean()
     lon_c = df_map['LON'].mean()
     m = folium.Map(location=[lat_c, lon_c], zoom_start=5, tiles='CartoDB dark_matter')
- 
+
     if modo.startswith('🔥'):
         heat_data = [[r['LAT'], r['LON'], float(r['EXCESO_KMH'])] for _, r in df_map.iterrows()]
         HeatMap(heat_data, radius=15, blur=20, max_zoom=10,
                 gradient={0.2:'#22c55e', 0.4:'#f59e0b', 0.6:'#f97316', 0.8:'#ef4444', 1.0:'#7f1d1d'}).add_to(m)
- 
+
     elif modo.startswith('📍'):
         cluster = MarkerCluster().add_to(m)
         for _, r in df_map.iterrows():
@@ -1835,7 +1831,7 @@ elif pg == "🗺️ Mapa Excesos":
                 popup=folium.Popup(popup, max_width=280),
                 tooltip=f"{r['DOMINIO']} · {r['VELOCIDAD']:.0f} km/h"
             ).add_to(cluster)
- 
+
     else:
         for _, r in df_map.iterrows():
             color = '#ef4444' if r['EXCESO_KMH']>=15 else ('#f97316' if r['EXCESO_KMH']>=7 else '#f59e0b')
@@ -1852,11 +1848,11 @@ elif pg == "🗺️ Mapa Excesos":
                 popup=folium.Popup(popup, max_width=280),
                 tooltip=f"{r['DOMINIO']} · {r['VELOCIDAD']:.0f} km/h"
             ).add_to(m)
- 
+
     st_folium(m, use_container_width=True, height=620, returned_objects=[])
- 
+
     st.caption(f"🟡 Leve (<7) · 🟠 Medio (7–15) · 🔴 Grave (≥15 km/h sobre límite {LIMITE_VELOCIDAD})")
- 
+
     st.divider()
     st.markdown('<div class="sec-title">🔥 Top Zonas Críticas (grilla ~11km)</div>', unsafe_allow_html=True)
     df_map['LAT_BIN'] = (df_map['LAT']*10).round()/10
@@ -1873,7 +1869,7 @@ elif pg == "🗺️ Mapa Excesos":
     hotspots = hotspots[cols_hot]
     hotspots.columns = ['Lat','Lon','Eventos','Severidad acum.','Vel. máx','Patentes'] + (['Ubicación ejemplo'] if 'UBICACION' in df_map.columns else [])
     st.dataframe(hotspots, use_container_width=True, hide_index=True)
- 
+
     st.markdown('<div class="sec-title">🚛 Ranking por patente (eventos geolocalizados)</div>', unsafe_allow_html=True)
     rank_pat = (df_map.groupby('DOMINIO').agg(
         EVENTOS=('DOMINIO','count'),
@@ -1888,9 +1884,9 @@ elif pg == "🗺️ Mapa Excesos":
     rank_pat['Vel. prom'] = rank_pat['Vel. prom'].round(1)
     rank_pat['Severidad (km/h acum.)'] = rank_pat['Severidad (km/h acum.)'].round(1)
     st.dataframe(rank_pat, use_container_width=True, hide_index=True)
- 
+
     st.caption('Fuente: hoja Velocidades de Google Sheets · Coordenadas Lat/Lon decodificadas como formato AR (-XX,XX)')
- 
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  PESTAÑA — DIAGNÓSTICO
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1996,6 +1992,3 @@ elif pg == "🔧 Diagnóstico":
     st.markdown('### 📋 Muestra de viajes')
     if not df_viajes_raw.empty:
         st.dataframe(df_viajes_raw.head(15), use_container_width=True, hide_index=True)
- 
-
-
