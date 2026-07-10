@@ -377,13 +377,19 @@ def cargar_datos_manejo():
                              'rows': len(df), 'col_score': col_score or '—',
                              'err': f'Falta DOMINIO o SCORE GENERAL. Cols: {list(df.columns)[:10]}'})
                 continue
-            _mes_parsed   = pd.to_datetime(df[col_mes], errors='coerce', dayfirst=True)
+            # Parsear MES hoja por hoja (evita que pandas infiera un único formato
+            # de fecha al concatenar hojas con formatos distintos, p.ej. "2026-04"
+            # en Stralis/S-Way vs "1/04/2026" en Scania — eso descartaba Scania entero).
+            _mes_parsed = pd.to_datetime(df[col_mes], errors='coerce', dayfirst=True)
+            if _mes_parsed.notna().sum() < len(df):
+                _mes_parsed2 = pd.to_datetime(df[col_mes], errors='coerce', dayfirst=False)
+                _mes_parsed = _mes_parsed.fillna(_mes_parsed2)
             _dom_norm     = df[col_dom].apply(normalizar_patente)
             _score_parsed = pd.to_numeric(
                 df[col_score].astype(str).str.replace(',', '.').str.replace(r'[^\d.\-]', '', regex=True),
                 errors='coerce')
             tmp = pd.DataFrame({
-                'MES': df[col_mes],
+                'MES': _mes_parsed,
                 'DOMINIO': df[col_dom],
                 'SCORE_CONDUCCION': _score_parsed,
             })
