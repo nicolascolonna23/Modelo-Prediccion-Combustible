@@ -385,7 +385,9 @@ def cargar_datos_manejo():
                     errors='coerce'),
             })
             diag.append({'modelo': sheet['modelo'], 'gid': sheet['gid'], 'status': status,
-                         'rows': len(df), 'col_score': col_score, 'err': 'OK'})
+                         'rows': len(df), 'col_score': col_score, 'err': 'OK',
+                         'dominio_raw_sample': [repr(v) for v in df[col_dom].head(10).tolist()],
+                         'dominio_raw_lens': [len(str(v)) for v in df[col_dom].head(10).tolist()]})
             dfs.append(tmp)
         except Exception as e:
             diag.append({'modelo': sheet['modelo'], 'gid': sheet['gid'], 'status': '?', 'rows': 0, 'col_score': '—', 'err': str(e)[:120]})
@@ -1976,6 +1978,12 @@ elif pg == "🔧 Diagnóstico":
         <div style="background:#0f172a;border:1px solid #334155;border-radius:6px;padding:6px 10px;margin:3px 0;font-size:.78rem;font-family:monospace;color:#e2e8f0;">
         {_icon} <b>{d['modelo']}</b> · gid={d['gid']} · HTTP <span style="color:{_color};font-weight:700;">{d['status']}</span> · filas: {d['rows']} · col: <code>{d['col_score']}</code> · {d['err']}
         </div>""", unsafe_allow_html=True)
+        if 'dominio_raw_sample' in d:
+            st.markdown(f"""
+            <div style="background:#0f172a;border:1px dashed #64748b;border-radius:6px;padding:6px 10px;margin:3px 0 10px 0;font-size:.72rem;font-family:monospace;color:#94a3b8;">
+            DOMINIO crudo (antes de normalizar) — repr: {d['dominio_raw_sample']}<br>
+            largos: {d['dominio_raw_lens']}
+            </div>""", unsafe_allow_html=True)
     st.markdown('## 🔧 Arreglos / Reparaciones')
     _ok_arr = (df_arreglos_raw is not None) and (not df_arreglos_raw.empty)
     if _ok_arr:
