@@ -1939,6 +1939,31 @@ elif pg == "🔧 Diagnóstico":
     _ok_vj = not df_viajes_raw.empty
     _det_vj = f'{len(df_viajes_raw):,} viajes · {df_viajes_raw["DOMINIO"].nunique() if _ok_vj else 0} patentes' if _ok_vj else 'Sin datos de viajes'
     _diag_card('Viajes totales (con y sin carga)', _ok_vj, _det_vj, f'Fuente: {CARGA_URL}')
+    st.markdown('## 🕵️ Test directo DOMINIO Scania (telemetría vs manejo)')
+    def _hexdump(s):
+        return ' '.join(f'{ord(ch):04X}' for ch in str(s))
+    _tel_doms = set(df_raw['DOMINIO'].dropna().unique()) if not df_raw.empty and 'DOMINIO' in df_raw.columns else set()
+    _man_doms = set(df_manejo_raw['DOMINIO'].dropna().unique()) if not df_manejo_raw.empty and 'DOMINIO' in df_manejo_raw.columns else set()
+    for _pat in SCANIA_PATENTES:
+        _in_tel = _pat in _tel_doms
+        _in_man = _pat in _man_doms
+        _match = _in_tel and _in_man
+        _color = '#22c55e' if _match else '#ef4444'
+        _icon  = '✅' if _match else '❌'
+        st.markdown(f"""
+        <div style="background:#0f172a;border:1px solid {_color};border-radius:6px;padding:8px 12px;margin:4px 0;font-size:.78rem;font-family:monospace;color:#e2e8f0;">
+        {_icon} <b>{_pat}</b> · en telemetría: {_in_tel} · en manejo: {_in_man} · match exacto: {_match}<br>
+        hex esperado (ASCII): {_hexdump(_pat)}
+        </div>""", unsafe_allow_html=True)
+    st.caption('Busca coincidencias exactas de string entre lo que llega de telemetría y de la hoja de manejo. Si "match exacto" da False para algún Scania, el problema está en cómo ese valor llega desde la fuente (no en el código).')
+    with st.expander('🔬 Ver todos los DOMINIO de telemetría que empiezan con AD o AE (para comparar a mano)'):
+        _cands = sorted([d for d in _tel_doms if str(d).upper().startswith(('AD','AE'))])
+        for _c in _cands:
+            st.code(f"{_c!r}  |  hex: {_hexdump(_c)}  |  len: {len(str(_c))}")
+    with st.expander('🔬 Ver todos los DOMINIO de manejo que empiezan con AD o AE (para comparar a mano)'):
+        _cands2 = sorted([d for d in _man_doms if str(d).upper().startswith(('AD','AE'))])
+        for _c in _cands2:
+            st.code(f"{_c!r}  |  hex: {_hexdump(_c)}  |  len: {len(str(_c))}")
     st.markdown('## 🎯 Score Conducción')
     _ok_man = not df_manejo_raw.empty
     _det_man = f'{len(df_manejo_raw):,} registros · {df_manejo_raw["DOMINIO"].nunique() if _ok_man else 0} patentes · {df_manejo_raw["MES"].min()} → {df_manejo_raw["MES"].max()}' if _ok_man else 'Sin datos de conducción'
