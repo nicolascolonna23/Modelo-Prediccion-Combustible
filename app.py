@@ -604,8 +604,19 @@ def calcular_ier(df, df_vel=None, df_carga=None, df_manejo=None):
         idx  = agg.index[mask]
         if mask.sum()==0: continue
         tkml_grp = agg.loc[idx,'TONKML']
-        if tiene_carga and tkml_grp.fillna(0).gt(0).sum() > 1:
-            agg.loc[idx,'SCORE_CONSUMO'] = calcular_score_zscore(tkml_grp.fillna(0), higher_is_better=True, k=0.4, min_sigma_pct=0.10).values
+        tiene_tkml_mask = tkml_grp.notna() & (tkml_grp > 0)
+        if tiene_carga and tiene_tkml_mask.sum() > 1:
+            # Scoring mixto: las unidades con ton·km/L válido en el período compiten
+            # entre sí por ese indicador. Las que no tienen carga asignada ese período
+            # NO se fuerzan a 0 (eso las hundía injustamente en el z-score) — compiten
+            # por L/100km, igual que si el grupo entero no tuviera datos de carga.
+            idx_con_tkml = idx[tiene_tkml_mask.values]
+            idx_sin_tkml = idx[~tiene_tkml_mask.values]
+            agg.loc[idx_con_tkml,'SCORE_CONSUMO'] = calcular_score_zscore(
+                agg.loc[idx_con_tkml,'TONKML'], higher_is_better=True, k=0.4, min_sigma_pct=0.10).values
+            if len(idx_sin_tkml) > 0:
+                agg.loc[idx_sin_tkml,'SCORE_CONSUMO'] = calcular_score_zscore(
+                    agg.loc[idx_sin_tkml,'L100KM'], higher_is_better=False, k=0.4, min_sigma_pct=0.05).values
         else:
             agg.loc[idx,'SCORE_CONSUMO'] = calcular_score_zscore(agg.loc[idx,'L100KM'], higher_is_better=False, k=0.4, min_sigma_pct=0.05).values
         agg.loc[idx,'SCORE_KM'] = calcular_score_zscore(agg.loc[idx,'KM'], higher_is_better=True, k=0.4, min_sigma_pct=0.05).values
