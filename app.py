@@ -26,8 +26,10 @@ SCANIA_PATENTES = ['AD247MQ', 'AE423IW']
 LIMITE_VELOCIDAD = 88
 BASE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR35NkYPtJrOrdYHLGUH7GIW93s5cPAqQ0zEk5fP1c3gvErwbUW7HJ2OeWBYaBVsYKVmCf0yhLvs6eG/pub?output=csv"
 GID_TEL  = "0"
+GID_UNID = "882343299"   # hoja DATOS UNIDADES (col D = Ralentí %)
 GID_VEL  = "1563993963"
 URL_TEL  = f"{BASE_URL}&gid={GID_TEL}"
+URL_UNID = f"{BASE_URL}&gid={GID_UNID}"
 # Hoja "EXCESOS DE VELOCIDAD" en spreadsheet propio: usar gviz (funciona con compartido por link)
 VEL_SHEET_ID = "1u7cckay0IJ60bfoKk2OZo-TjCvTbH9O1wKxNFdSKDCQ"
 URL_VEL  = f"https://docs.google.com/spreadsheets/d/{VEL_SHEET_ID}/gviz/tq?tqx=out:csv&gid={GID_VEL}"
@@ -157,6 +159,10 @@ def normalizar_patente(valor):
 def cargar_datos():
     try:
         df1 = pd.read_csv(URL_TEL)
+        try:
+            df2 = pd.read_csv(URL_UNID)
+        except Exception:
+            df2 = pd.DataFrame()
         def limpiar(df):
             df.columns = [str(c).strip().upper() for c in df.columns]
             df = df.loc[:, ~df.columns.duplicated()]
@@ -169,12 +175,13 @@ def cargar_datos():
                 elif "TAG"       in c:                                  cm[c] = "TAG"
                 elif "FECHA"     in c or "DATE"     in c:              cm[c] = "FECHA"
                 elif "L/100"     in c or "CONSUMO C" in c:             cm[c] = "L100KM"
+                elif "RALENT"    in c:                                  cm[c] = "RALENTI_PCT"
                 elif "TIEMPO"    in c and "MOTOR"   in c:              cm[c] = "TIEMPO_MOTOR"
                 elif "EMPRESA"   in c:                                  cm[c] = "EMPRESA"
             df = df.rename(columns=cm).loc[:, ~df.rename(columns=cm).columns.duplicated()]
             if "DOMINIO" in df.columns:
                 df["DOMINIO"] = df["DOMINIO"].apply(normalizar_patente)
-            for col in ["LITROS", "KM", "L100KM"]:
+            for col in ["LITROS", "KM", "L100KM", "RALENTI_PCT"]:
                 if col in df.columns:
                     serie = df[col]
                     if isinstance(serie, pd.DataFrame):
@@ -185,11 +192,41 @@ def cargar_datos():
                 df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce", dayfirst=True)
             return df
         df1 = limpiar(df1)
+        if not df2.empty:
+            df2 = limpiar(df2)
         if "L100KM" not in df1.columns and "LITROS" in df1.columns and "KM" in df1.columns:
             df1["L100KM"] = (df1["LITROS"] / df1["KM"].replace(0, np.nan) * 100).round(2)
+        # ── RALENTÍ ────────────────────────────────────────────────────────────
+        # La hoja DATOS UNIDADES (col D) trae el ralentí como PORCENTAJE sobre los
+        # litros de ese mes. Se cruza por DOMINIO+MES con la telemetría y:
+        #   · RALENTI_PCT  → porcentaje directo de la hoja (para los KPIs)
+        #   · RALENTI (L)  → % × litros del período = litros gastados en ralentí
+        if ('RALENTI_PCT' in df2.columns and 'DOMINIO' in df2.columns
+                and 'FECHA' in df2.columns and 'FECHA' in df1.columns and 'LITROS' in df1.columns):
+            df2_ral = df2[['DOMINIO', 'FECHA', 'RALENTI_PCT']].copy()
+            df2_ral = df2_ral[df2_ral['RALENTI_PCT'] > 0]
+            df2_ral['_MES'] = df2_ral['FECHA'].dt.to_period('M')
+            # un % por DOMINIO+MES (si hubiera filas repetidas, promedio)
+            df2_ral = (df2_ral.groupby(['DOMINIO', '_MES'], as_index=False)['RALENTI_PCT']
+                              .mean())
+            df1['_MES'] = df1['FECHA'].dt.to_period('M')
+            df1 = df1.merge(
+                df2_ral.rename(columns={'RALENTI_PCT': '_RAL_PCT_u'}),
+                on=['DOMINIO', '_MES'], how='left'
+            )
+            if 'RALENTI_PCT' in df1.columns:
+                df1['RALENTI_PCT'] = (df1['RALENTI_PCT'].where(df1['RALENTI_PCT'] > 0)
+                                      .combine_first(df1['_RAL_PCT_u']).fillna(0))
+            else:
+                df1['RALENTI_PCT'] = df1['_RAL_PCT_u'].fillna(0)
+            df1['RALENTI'] = (df1['RALENTI_PCT'] / 100.0) * df1['LITROS']
+            df1.drop(columns=['_RAL_PCT_u', '_MES'], inplace=True, errors='ignore')
+        else:
+            df1['RALENTI_PCT'] = 0.0
+            df1['RALENTI'] = 0.0
         if "EMPRESA" in df1.columns:
             df1 = df1[df1["EMPRESA"].str.upper().str.contains("LAD|DIEMAR", na=False)]
-        return df1, pd.DataFrame()
+        return df1, df2
     except Exception as e:
         st.error(f"Error cargando datos: {e}")
         return pd.DataFrame(), pd.DataFrame()
@@ -542,6 +579,19 @@ def calcular_ier(df, df_vel=None, df_carga=None, df_manejo=None):
     if 'MES_PERIODO' in df_c.columns:
         agg_dict['MESES'] = ('MES_PERIODO','nunique')
     agg = df_c.groupby('DOMINIO').agg(**agg_dict).reset_index()
+    # % Ralentí por patente: se toma el porcentaje directo de la hoja DATOS UNIDADES
+    # (promedio de los % mensuales ponderado por litros = litros ralentí / litros totales).
+    if 'RALENTI' in df_c.columns and 'RALENTI_PCT' in df_c.columns:
+        ral = df_c.groupby('DOMINIO').agg(
+            _RAL=('RALENTI', 'sum'), _LTS=('LITROS', 'sum'),
+            _RAL_PCT_MEAN=('RALENTI_PCT', 'mean')).reset_index()
+        ral['RALENTI_PCT'] = np.where(
+            ral['_LTS'] > 0, ral['_RAL'] / ral['_LTS'] * 100, ral['_RAL_PCT_MEAN']
+        ).clip(0, 100).round(2)
+        agg = agg.merge(ral[['DOMINIO', 'RALENTI_PCT']], on='DOMINIO', how='left')
+    else:
+        agg['RALENTI_PCT'] = 0.0
+    agg['RALENTI_PCT'] = agg['RALENTI_PCT'].fillna(0.0)
     if df_vel is not None and not df_vel.empty and 'DOMINIO' in df_vel.columns:
         vel_counts = df_vel.groupby('DOMINIO').agg(
             EXCESOS=('DOMINIO','count'),
@@ -649,7 +699,7 @@ def calcular_ier(df, df_vel=None, df_carga=None, df_manejo=None):
     agg['TONKML']     = agg['TONKML'].fillna(0).round(2)
     agg['TONKML_MOD'] = agg['TONKML_MOD'].fillna(0).round(2)
     keep = ['DOMINIO','MODELO','IER','CLASIFICACION',
-            'L100KM','L100KM_MOD',
+            'L100KM','L100KM_MOD','RALENTI_PCT',
             'KM','KM_MOD','LITROS','EXCESOS','SEVERIDAD','SEVERIDAD_MOD','VEL_MAX','EXCESOS_MOD',
             'PESO_TON','TONKML','TONKML_MOD',
             'SCORE_CONDUCCION','SCORE_MANEJO_MOD','TIENE_MANEJO',
@@ -712,6 +762,16 @@ df['MES_PERIODO'] = df['FECHA'].dt.to_period('M')
 df['MES_NUM']     = df['FECHA'].dt.month
 meses_df = df.groupby('MES_PERIODO').agg(LITROS=('LITROS','sum'),KM=('KM','sum')).reset_index().sort_values('MES_PERIODO')
 meses_df['L100'] = (meses_df['LITROS']/meses_df['KM'].replace(0,np.nan)*100).round(2)
+ralenti_total = df['RALENTI'].sum() if 'RALENTI' in df.columns else 0
+ralenti_delta_txt = ''
+if 'RALENTI' in df.columns and 'MES_PERIODO' in df.columns:
+    _mg = df.groupby('MES_PERIODO').agg(_RAL=('RALENTI','sum'),_LTS=('LITROS','sum')).reset_index().sort_values('MES_PERIODO')
+    if len(_mg)>=2:
+        _curr=_mg.iloc[-1]; _prev=_mg.iloc[-2]
+        _pct_curr=_curr['_RAL']/_curr['_LTS']*100 if _curr['_LTS']>0 else 0
+        _pct_prev=_prev['_RAL']/_prev['_LTS']*100 if _prev['_LTS']>0 else 0
+        _dr=_pct_curr-_pct_prev
+        ralenti_delta_txt=f"{'▲' if _dr>0 else '▼'} {abs(_dr):.1f}pp vs mes ant."
 df_full_clean = df_full[df_full['FECHA'].notna()&(df_full['KM']>0)].copy()
 df_full_clean['MES_PERIODO'] = df_full_clean['FECHA'].dt.to_period('M')
 meses_hist_full = df_full_clean.groupby('MES_PERIODO').agg(LITROS=('LITROS','sum'),KM=('KM','sum')).reset_index().sort_values('MES_PERIODO')
@@ -753,9 +813,7 @@ if pg == "Dashboard Principal":
     l100_prom  = round(lts_total/kms_total*100,2) if kms_total>0 else 0
     costo_est  = lts_total*precio_gasoil
     n_unidades = df['DOMINIO'].nunique() if 'DOMINIO' in df.columns else 0
-    _fechas_flota = df['FECHA'].dropna() if 'FECHA' in df.columns else pd.Series([], dtype='datetime64[ns]')
-    dias_periodo  = (_fechas_flota.max()-_fechas_flota.min()).days+1 if not _fechas_flota.empty else 0
-    km_dia_flota  = kms_total/dias_periodo if dias_periodo>0 else 0
+    ralenti_pct = round(ralenti_total/lts_total*100,1) if lts_total>0 else 0
     if len(meses_df)>=2:
         delta_l100 = meses_df['L100'].iloc[-1]-meses_df['L100'].iloc[-2]
         delta_txt  = f"{'▲' if delta_l100>0 else '▼'} {abs(delta_l100):.2f} vs mes anterior"
@@ -771,7 +829,8 @@ if pg == "Dashboard Principal":
     k4,k5,k6 = st.columns(3)
     kpi(k4,'kpi-amber','💰 Costo estimado',f'${costo_est/1e6:.1f}M',f'@ ${precio_gasoil:,.0f}/L')
     kpi(k5,'kpi-green','🚛 Unidades activas',f'{n_unidades}','dominios únicos')
-    kpi(k6,'kpi-purple','🛣️ KM/día flota',f'{km_dia_flota:,.0f}',f'{dias_periodo} días de período' if dias_periodo>0 else 'sin fechas')
+    _ral_sub = (f'{ralenti_total:,.0f} L · {ralenti_delta_txt}' if ralenti_delta_txt else f'{ralenti_total:,.0f} L en ralentí')
+    kpi(k6,'kpi-amber','⏱️ % Ralentí',f'{ralenti_pct:.1f}%',_ral_sub)
     st.divider()
     st.markdown(f'<div class="sec-title">Rendimiento por Modelo — {anio_sel}</div>', unsafe_allow_html=True)
     def stats_modelo(patentes_lista):
@@ -900,12 +959,12 @@ if pg == "Dashboard Principal":
         st.plotly_chart(fig_ier, use_container_width=True)
         st.caption('Verde = mejor que su modelo · Rojo = peor · Línea amarilla = base 100 · Hover para detalle completo')
         with st.expander('📋 Ver tabla detallada IER (todos los componentes)'):
-            show_cols=['DOMINIO','MODELO','IER','CLASIFICACION','L100KM','L100KM_MOD',
+            show_cols=['DOMINIO','MODELO','IER','CLASIFICACION','L100KM','L100KM_MOD','RALENTI_PCT',
                        'EXCESOS','SEVERIDAD','SEVERIDAD_MOD','VEL_MAX','KM','PESO_TON','TONKML','TONKML_MOD',
                        'SCORE_CONDUCCION','SCORE_CONSUMO','SCORE_MANEJO','SCORE_VEL']
             ier_show=df_ier[[c for c in show_cols if c in df_ier.columns]].copy()
             col_rename={'DOMINIO':'Patente','MODELO':'Modelo','IER':'IER','CLASIFICACION':'Clasificación',
-                'L100KM':'L/100km','L100KM_MOD':'Prom L/100km',
+                'L100KM':'L/100km','L100KM_MOD':'Prom L/100km','RALENTI_PCT':'% Ralentí',
                 'EXCESOS':f'Cant. Excesos >{LIMITE_VELOCIDAD}km/h',
                 'SEVERIDAD':'Severidad total (km/h acum.)','SEVERIDAD_MOD':'Sev. total prom mod.',
                 'VEL_MAX':'Vel. Máx (km/h)',
@@ -913,7 +972,7 @@ if pg == "Dashboard Principal":
                 'SCORE_CONDUCCION':'Score Conducción (/10)',
                 'SCORE_CONSUMO':'S.Consumo (50%)','SCORE_MANEJO':'S.Manejo (40%)','SCORE_VEL':'S.Vel (10%)'}
             ier_show=ier_show.rename(columns=col_rename)
-            for c in ['IER','L/100km','Prom L/100km','Severidad total (km/h acum.)','Sev. total prom mod.','Score Conducción (/10)']:
+            for c in ['IER','L/100km','Prom L/100km','% Ralentí','Severidad total (km/h acum.)','Sev. total prom mod.','Score Conducción (/10)']:
                 if c in ier_show.columns: ier_show[c]=ier_show[c].round(2)
             for c in ['S.Consumo (50%)','S.Manejo (40%)','S.Vel (10%)']:
                 if c in ier_show.columns: ier_show[c]=ier_show[c].round(3)
@@ -1168,7 +1227,7 @@ if pg == "Dashboard Principal":
         st.info(f'⚠️ No hay datos de arreglos disponibles. ({_arr_err}) Revisá la pestaña 🔧 Diagnóstico.')
     st.divider()
     with st.expander(f'Ver datos completos {anio_sel}'):
-        cols_s=[c for c in ['DOMINIO','MARCA','MODELO','FECHA','KM','LITROS','L100KM'] if c in df.columns]
+        cols_s=[c for c in ['DOMINIO','MARCA','MODELO','FECHA','KM','LITROS','L100KM','RALENTI_PCT','RALENTI'] if c in df.columns]
         st.dataframe(df[cols_s], use_container_width=True, height=380)
     st.caption(f'Datos {anio_sel}: Google Sheets Expreso Diemar | Precio: {precio_fuente} | Excesos: satelital >{LIMITE_VELOCIDAD} km/h | Actualización cada 10 min')
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1444,6 +1503,7 @@ elif pg == "Análisis por Patente":
                         st.metric('🎯 Score conducción',f"{sc_man_v:.2f}/10",f"{delta_man:+.2f} vs prom. {modelo_pat} ({sc_man_m:.2f})" if pd.notnull(sc_man_m) else 'sin promedio',delta_color='normal')
                     else:
                         st.metric('🎯 Score conducción','sin datos','score neutral (1.0)')
+                    st.metric('⏱️ % Ralentí',f"{ier_row.get('RALENTI_PCT',0):.1f}%",'referencia — no entra en el IER')
             df_vel_pat=(df_vel_filtrado[df_vel_filtrado['DOMINIO']==pat_sel] if not df_vel_filtrado.empty else pd.DataFrame())
             if not df_vel_pat.empty:
                 st.markdown(f'<div class="sec-title">🚨 Excesos de Velocidad >{LIMITE_VELOCIDAD} km/h — {pat_sel}</div>', unsafe_allow_html=True)
