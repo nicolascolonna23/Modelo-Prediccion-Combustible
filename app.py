@@ -755,9 +755,37 @@ if 'FECHA' in df.columns and df['FECHA'].notna().any():
     patentes_sel  = st.sidebar.multiselect('Patente', patentes_disp, default=[], placeholder="Todas las patentes")
     if marcas_sel   and 'MARCA'   in df.columns: df = df[df['MARCA'].isin(marcas_sel)]
     if patentes_sel and 'DOMINIO' in df.columns: df = df[df['DOMINIO'].isin(patentes_sel)]
+    st.session_state['marcas_sel']   = marcas_sel
+    st.session_state['patentes_sel'] = patentes_sel
 if df.empty:
     st.warning(f'Sin datos para {anio_sel} con los filtros seleccionados.')
     st.stop()
+# ── Helpers L/100km mensual (módulo de evolución) ──────────────────────────
+MESES_ABBR = {1:'ene',2:'feb',3:'mar',4:'abr',5:'may',6:'jun',
+              7:'jul',8:'ago',9:'sep',10:'oct',11:'nov',12:'dic'}
+def etiqueta_mes(p):
+    """Period('2025-01','M') -> 'ene 2025'"""
+    try:
+        return f"{MESES_ABBR[p.month]} {p.year}"
+    except Exception:
+        return str(p)
+def serie_l100(dframe, dominios=None):
+    """Serie mensual de L/100km (litros totales / km totales * 100).
+       dominios=None -> toda la flota del dataframe recibido."""
+    if dframe is None or dframe.empty or 'MES_PERIODO' not in dframe.columns:
+        return pd.DataFrame(columns=['MES_PERIODO','LITROS','KM','L100','LABEL'])
+    d = dframe
+    if dominios:
+        d = d[d['DOMINIO'].isin(dominios)]
+    if d.empty:
+        return pd.DataFrame(columns=['MES_PERIODO','LITROS','KM','L100','LABEL'])
+    g = (d.groupby('MES_PERIODO')
+           .agg(LITROS=('LITROS','sum'), KM=('KM','sum'))
+           .reset_index().sort_values('MES_PERIODO'))
+    g = g[g['KM'] > 0].copy()
+    g['L100']  = (g['LITROS']/g['KM']*100).round(2)
+    g['LABEL'] = g['MES_PERIODO'].apply(etiqueta_mes)
+    return g
 df['MES_PERIODO'] = df['FECHA'].dt.to_period('M')
 df['MES_NUM']     = df['FECHA'].dt.month
 meses_df = df.groupby('MES_PERIODO').agg(LITROS=('LITROS','sum'),KM=('KM','sum')).reset_index().sort_values('MES_PERIODO')
@@ -831,6 +859,161 @@ if pg == "Dashboard Principal":
     kpi(k5,'kpi-green','🚛 Unidades activas',f'{n_unidades}','dominios únicos')
     _ral_sub = (f'{ralenti_total:,.0f} L · {ralenti_delta_txt}' if ralenti_delta_txt else f'{ralenti_total:,.0f} L en ralentí')
     kpi(k6,'kpi-amber','⏱️ % Ralentí',f'{ralenti_pct:.1f}%',_ral_sub)
+    # ═══════════════════════════════════════════════════════════════════════
+    #  MÓDULO — LITROS CADA 100 KM DEL MES + EVOLUCIÓN
+    # ═══════════════════════════════════════════════════════════════════════
+    st.divider()
+    st.markdown('<div class="sec-title">⛽ Litros cada 100 km — Consumo del mes y evolución</div>', unsafe_allow_html=True)
+    fc1, fc2, fc3 = st.columns([1.1, 2.4, 1.0])
+    with fc1:
+        alcance_l100 = st.radio('Período a graficar',
+                                ['Rango filtrado', 'Histórico completo'],
+                                index=0, key='l100_alcance',
+                                help='"Rango filtrado" usa el año y los meses elegidos en la barra lateral. '
+                                     '"Histórico completo" muestra todos los meses disponibles (todos los años).')
+    if alcance_l100 == 'Histórico completo':
+        base_l100 = df_full[df_full['FECHA'].notna()].copy()
+        _mk = st.session_state.get('marcas_sel', [])
+        _pk = st.session_state.get('patentes_sel', [])
+        if _mk and 'MARCA'   in base_l100.columns: base_l100 = base_l100[base_l100['MARCA'].isin(_mk)]
+        if _pk and 'DOMINIO' in base_l100.columns: base_l100 = base_l100[base_l100['DOMINIO'].isin(_pk)]
+        base_l100['MES_PERIODO'] = base_l100['FECHA'].dt.to_period('M')
+    else:
+        base_l100 = df.copy()
+    with fc2:
+        pats_l100_disp = sorted(base_l100['DOMINIO'].dropna().unique().tolist()) if 'DOMINIO' in base_l100.columns else []
+        pats_l100_sel  = st.multiselect('Separar por patente (opcional)', pats_l100_disp, default=[],
+                                        placeholder='Todas juntas (total flota)', key='l100_pats',
+                                        help='Elegí una o varias patentes para ver su curva individual de L/100km.')
+    with fc3:
+        ver_flota = st.checkbox('Línea total flota', value=True, key='l100_ver_flota')
+    serie_flota = serie_l100(base_l100)
+    serie_kpi   = serie_l100(base_l100, pats_l100_sel) if pats_l100_sel else serie_flota
+    kpi_scope   = (pats_l100_sel[0] if len(pats_l100_sel)==1
+                   else (f'{len(pats_l100_sel)} patentes seleccionadas' if pats_l100_sel else 'Total flota'))
+    if serie_kpi.empty:
+        st.info('Sin kilómetros registrados para la selección actual.')
+    else:
+        _ult      = serie_kpi.iloc[-1]
+        _mes_ult  = _ult['LABEL']
+        _l100_ult = float(_ult['L100'])
+        if len(serie_kpi) >= 2:
+            _prev      = serie_kpi.iloc[-2]
+            _d_l100    = _l100_ult - float(_prev['L100'])
+            _d_pct     = (_d_l100/float(_prev['L100'])*100) if float(_prev['L100'])>0 else 0
+            _d_color   = 'kpi-red' if _d_l100 > 0 else 'kpi-green'
+            _d_valor   = f"{'▲' if _d_l100>0 else '▼'} {abs(_d_l100):.2f}"
+            _d_sub     = f"{_d_pct:+.1f}% vs {_prev['LABEL']} ({float(_prev['L100']):.2f} L/100km)"
+        else:
+            _d_color, _d_valor, _d_sub = '', '—', 'sin mes anterior para comparar'
+        _prom_per = float(serie_kpi['LITROS'].sum()/serie_kpi['KM'].sum()*100) if serie_kpi['KM'].sum()>0 else 0
+        _mejor    = serie_kpi.loc[serie_kpi['L100'].idxmin()]
+        _peor     = serie_kpi.loc[serie_kpi['L100'].idxmax()]
+        _vs_prom  = _l100_ult - _prom_per
+        _col_ult  = 'kpi-green' if _vs_prom <= 0 else 'kpi-red'
+        m1, m2, m3 = st.columns(3)
+        m1.markdown(
+            f'<div class="kpi-card {_col_ult}"><div class="kpi-label">⛽ L/100 km — {_mes_ult}</div>'
+            f'<div class="kpi-value">{_l100_ult:.2f}</div>'
+            f'<div class="kpi-sub">{kpi_scope} · {_ult["LITROS"]:,.0f} L / {_ult["KM"]:,.0f} km</div></div>',
+            unsafe_allow_html=True)
+        m2.markdown(
+            f'<div class="kpi-card {_d_color}"><div class="kpi-label">📉 Variación mensual</div>'
+            f'<div class="kpi-value">{_d_valor}</div>'
+            f'<div class="kpi-sub">{_d_sub}</div></div>',
+            unsafe_allow_html=True)
+        m3.markdown(
+            f'<div class="kpi-card kpi-purple"><div class="kpi-label">📊 Promedio del período</div>'
+            f'<div class="kpi-value">{_prom_per:.2f}</div>'
+            f'<div class="kpi-sub">{len(serie_kpi)} meses · mejor {_mejor["LABEL"]} ({float(_mejor["L100"]):.2f}) · '
+            f'peor {_peor["LABEL"]} ({float(_peor["L100"]):.2f})</div></div>',
+            unsafe_allow_html=True)
+    # ── Gráfico de evolución ──────────────────────────────────────────────
+    series_plot = []
+    if ver_flota and not serie_flota.empty:
+        series_plot.append(('Total flota', serie_flota, '#60a5fa', True))
+    PALETA_PAT = ['#f97316','#22c55e','#a78bfa','#ec4899','#facc15','#14b8a6',
+                  '#ef4444','#38bdf8','#84cc16','#fb7185','#c084fc','#2dd4bf']
+    for i, _pat in enumerate(pats_l100_sel):
+        _s = serie_l100(base_l100, [_pat])
+        if not _s.empty:
+            series_plot.append((_pat, _s, PALETA_PAT[i % len(PALETA_PAT)], False))
+    if not series_plot:
+        st.info('Elegí al menos una patente o activá la línea de total flota para ver la evolución.')
+    elif all(len(s) < 2 for _, s, _c, _f in series_plot):
+        st.info('Hay un solo mes en la selección. Ampliá el rango de meses (barra lateral) para ver la evolución.')
+    else:
+        _labels_orden = (serie_flota['LABEL'].tolist() if not serie_flota.empty
+                         else series_plot[0][1]['LABEL'].tolist())
+        for _n, _s, _c, _f in series_plot:
+            for _lb in _s['LABEL'].tolist():
+                if _lb not in _labels_orden:
+                    _labels_orden.append(_lb)
+        _orden_map = {etiqueta_mes(p): p for _, _s, _c, _f in series_plot for p in _s['MES_PERIODO']}
+        _labels_orden = sorted(set(_labels_orden), key=lambda l: _orden_map.get(l))
+        _all_vals = [v for _n, _s, _c, _f in series_plot for v in _s['L100'].tolist()]
+        _y_min = min(_all_vals); _y_max = max(_all_vals)
+        _pad   = max((_y_max - _y_min) * 0.28, 1.2)
+        _n_series = len(series_plot)
+        fig_l100 = go.Figure()
+        for _i_s, (_n, _s, _c, _fill) in enumerate(series_plot):
+            _n_pts = len(_s)
+            # con varias curvas se rotulan solo los puntos clave para no saturar el gráfico
+            if _n_series > 3 and _i_s > 0:
+                _txt = [''] * _n_pts
+            elif _n_pts <= 14 and _n_series == 1:
+                _txt = [f'{v:.1f}'.replace('.', ',') for v in _s['L100']]
+            else:
+                _idx_key = {0, _n_pts-1, int(_s['L100'].values.argmin()), int(_s['L100'].values.argmax())}
+                _txt = [f'{v:.1f}'.replace('.', ',') if i in _idx_key else ''
+                        for i, v in enumerate(_s['L100'])]
+            # el primer/último rótulo se corre hacia adentro para que no lo corte el borde
+            _tpos = ['top right' if i == 0 else ('top left' if i == _n_pts-1 else 'top center')
+                     for i in range(_n_pts)]
+            fig_l100.add_trace(go.Scatter(
+                x=_s['LABEL'], y=_s['L100'], name=_n,
+                mode='lines+markers+text',
+                text=_txt, textposition=_tpos,
+                textfont=dict(color='#cbd5e1', size=10),
+                line=dict(color=_c, width=3, shape='spline'),
+                marker=dict(size=7, color=_c, line=dict(color='#0f172a', width=1.5)),
+                fill='tozeroy' if _fill else None,
+                fillcolor=('rgba(96,165,250,0.18)' if _n_series == 1 else 'rgba(96,165,250,0.10)') if _fill else None,
+                hovertemplate=f'<b>{_n}</b><br>%{{x}}<br>L/100km: <b>%{{y:.2f}}</b><extra></extra>'))
+        if not serie_kpi.empty and _n_series == 1:
+            fig_l100.add_hline(y=_prom_per, line_dash='dot', line_color='#f59e0b', line_width=1.5,
+                               annotation_text=f'Promedio {_prom_per:.2f}', annotation_position='top left',
+                               annotation_font_color='#fbbf24', annotation_font_size=10)
+        fig_l100.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(30,41,59,0.6)',
+            font=dict(color='#e2e8f0'),
+            legend=dict(bgcolor='rgba(15,23,42,0.8)', bordercolor='#334155', borderwidth=1,
+                        orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
+            showlegend=_n_series > 1,
+            xaxis=dict(gridcolor='#1e293b', linecolor='#334155', tickfont=dict(color='#94a3b8', size=10),
+                       title=dict(text='Mes', font=dict(color='#64748b')), tickangle=-45,
+                       categoryorder='array', categoryarray=_labels_orden),
+            yaxis=dict(gridcolor='#1e293b', linecolor='#334155', tickfont=dict(color='#94a3b8', size=11),
+                       title=dict(text='L/100 km', font=dict(color='#64748b')),
+                       range=[max(0, _y_min - _pad), _y_max + _pad]),
+            height=430, margin=dict(l=20, r=25, t=50, b=70), hovermode='x unified')
+        st.plotly_chart(fig_l100, use_container_width=True)
+        st.caption('Promedio ponderado por mes (litros totales ÷ km totales × 100). '
+                   'Usá el selector de patentes para comparar unidades y los filtros de la barra lateral para acotar meses, marca o año.')
+        with st.expander('📋 Ver tabla mensual de L/100 km'):
+            _tabla = pd.DataFrame({'Mes': _labels_orden})
+            for _n, _s, _c, _f in series_plot:
+                _tabla = _tabla.merge(
+                    _s[['LABEL','L100']].rename(columns={'LABEL':'Mes','L100':_n}),
+                    on='Mes', how='left')
+            if not serie_flota.empty:
+                _tabla = _tabla.merge(
+                    serie_flota[['LABEL','LITROS','KM']].rename(
+                        columns={'LABEL':'Mes','LITROS':'Litros (flota)','KM':'KM (flota)'}),
+                    on='Mes', how='left')
+                for _c_fmt in ['Litros (flota)','KM (flota)']:
+                    _tabla[_c_fmt] = _tabla[_c_fmt].apply(lambda x: f'{x:,.0f}' if pd.notnull(x) else '—')
+            st.dataframe(_tabla, use_container_width=True, hide_index=True)
     st.divider()
     st.markdown(f'<div class="sec-title">Rendimiento por Modelo — {anio_sel}</div>', unsafe_allow_html=True)
     def stats_modelo(patentes_lista):
