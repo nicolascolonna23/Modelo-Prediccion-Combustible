@@ -1014,6 +1014,155 @@ if pg == "Dashboard Principal":
                 for _c_fmt in ['Litros (flota)','KM (flota)']:
                     _tabla[_c_fmt] = _tabla[_c_fmt].apply(lambda x: f'{x:,.0f}' if pd.notnull(x) else '—')
             st.dataframe(_tabla, use_container_width=True, hide_index=True)
+    # ═══════════════════════════════════════════════════════════════════════
+    #  MÓDULO — LITROS vs KILÓMETROS POR MES (correlación)
+    # ═══════════════════════════════════════════════════════════════════════
+    st.divider()
+    st.markdown('<div class="sec-title">📈 Litros y kilómetros por mes — ¿se mueven juntos?</div>', unsafe_allow_html=True)
+    st.caption(f'Usa los mismos controles de arriba: {kpi_scope} · '
+               f'{"histórico completo" if alcance_l100 == "Histórico completo" else "rango filtrado"}.')
+    if serie_kpi.empty or len(serie_kpi) < 2:
+        st.info('Se necesitan al menos 2 meses en la selección para comparar litros contra kilómetros.')
+    else:
+        _lbl = serie_kpi['LABEL'].tolist()
+        _lts = serie_kpi['LITROS'].astype(float).values
+        _kms = serie_kpi['KM'].astype(float).values
+        _n_m = len(serie_kpi)
+        # ── correlación y ajuste lineal litros = a·km + b ──────────────────
+        _r = float(np.corrcoef(_kms, _lts)[0,1]) if (_kms.std() > 0 and _lts.std() > 0) else np.nan
+        if _n_m >= 3 and _kms.std() > 0:
+            _slope, _intercept = np.polyfit(_kms, _lts, 1)
+        else:
+            _slope, _intercept = np.nan, np.nan
+        # meses en que km y litros se movieron en la misma dirección
+        _d_k = np.diff(_kms); _d_l = np.diff(_lts)
+        _mismo = int(np.sum(np.sign(_d_k) == np.sign(_d_l)))
+        _tot_mov = len(_d_k)
+        if np.isnan(_r):          _r_txt, _r_col = 'sin variación', ''
+        elif _r >= 0.9:           _r_txt, _r_col = 'muy fuerte — los litros siguen a los km', 'kpi-green'
+        elif _r >= 0.7:           _r_txt, _r_col = 'fuerte', 'kpi-green'
+        elif _r >= 0.4:           _r_txt, _r_col = 'moderada — pesan otros factores', 'kpi-amber'
+        elif _r >= 0:             _r_txt, _r_col = 'débil — el consumo no explica los km', 'kpi-red'
+        else:                     _r_txt, _r_col = 'inversa — a más km, menos litros', 'kpi-red'
+        c1, c2, c3 = st.columns(3)
+        c1.markdown(
+            f'<div class="kpi-card {_r_col}"><div class="kpi-label">🔗 Correlación km ↔ litros</div>'
+            f'<div class="kpi-value">{"—" if np.isnan(_r) else f"{_r:.2f}"}</div>'
+            f'<div class="kpi-sub">{_r_txt} · R²={0 if np.isnan(_r) else _r**2:.2f} · {_n_m} meses</div></div>',
+            unsafe_allow_html=True)
+        _marg_txt = '—' if np.isnan(_slope) else f'{_slope*100:.1f}'
+        _marg_sub = ('se necesitan 3 meses o más' if np.isnan(_slope)
+                     else f'litros por cada 100 km extra · promedio del período {_prom_per:.2f}')
+        c2.markdown(
+            f'<div class="kpi-card kpi-purple"><div class="kpi-label">📐 Consumo marginal</div>'
+            f'<div class="kpi-value">{_marg_txt}</div>'
+            f'<div class="kpi-sub">{_marg_sub}</div></div>',
+            unsafe_allow_html=True)
+        c3.markdown(
+            f'<div class="kpi-card"><div class="kpi-label">🔄 Se mueven igual</div>'
+            f'<div class="kpi-value">{_mismo}/{_tot_mov}</div>'
+            f'<div class="kpi-sub">meses en que km y litros subieron o bajaron juntos</div></div>',
+            unsafe_allow_html=True)
+        # ── gráfico 1: litros y km por mes (doble eje) ─────────────────────
+        def _compacto(v):
+            return f'{v/1000:,.1f}k'.replace('.', ',') if v >= 1000 else f'{v:,.0f}'
+        def _txt_clave(vals):
+            _k = {0, len(vals)-1, int(vals.argmin()), int(vals.argmax())}
+            return [_compacto(v) if i in _k else '' for i, v in enumerate(vals)]
+        _tp = ['top right' if i == 0 else ('top left' if i == _n_m-1 else 'top center') for i in range(_n_m)]
+        fig_lk = go.Figure()
+        fig_lk.add_trace(go.Scatter(
+            x=_lbl, y=_lts, name='Litros', mode='lines+markers+text',
+            text=_txt_clave(_lts), textposition=_tp, textfont=dict(color='#fcd34d', size=10),
+            line=dict(color='#f59e0b', width=3, shape='spline'),
+            marker=dict(size=7, color='#f59e0b', line=dict(color='#0f172a', width=1.5)),
+            fill='tozeroy', fillcolor='rgba(245,158,11,0.15)',
+            hovertemplate='%{x}<br>Litros: <b>%{y:,.0f}</b><extra></extra>'))
+        fig_lk.add_trace(go.Scatter(
+            x=_lbl, y=_kms, name='Kilómetros', mode='lines+markers+text', yaxis='y2',
+            text=_txt_clave(_kms), textposition=_tp, textfont=dict(color='#7dd3fc', size=10),
+            line=dict(color='#38bdf8', width=3, shape='spline'),
+            marker=dict(size=7, color='#38bdf8', line=dict(color='#0f172a', width=1.5)),
+            hovertemplate='%{x}<br>KM: <b>%{y:,.0f}</b><extra></extra>'))
+        _pad_l = max((_lts.max()-_lts.min())*0.30, _lts.max()*0.05)
+        _pad_k = max((_kms.max()-_kms.min())*0.30, _kms.max()*0.05)
+        fig_lk.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(30,41,59,0.6)',
+            font=dict(color='#e2e8f0'),
+            legend=dict(bgcolor='rgba(15,23,42,0.8)', bordercolor='#334155', borderwidth=1,
+                        orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
+            xaxis=dict(gridcolor='#1e293b', linecolor='#334155', tickfont=dict(color='#94a3b8', size=10),
+                       title=dict(text='Mes', font=dict(color='#64748b')), tickangle=-45,
+                       categoryorder='array', categoryarray=_lbl),
+            yaxis=dict(gridcolor='#1e293b', linecolor='#334155', tickfont=dict(color='#fbbf24', size=11),
+                       title=dict(text='Litros', font=dict(color='#f59e0b')),
+                       range=[max(0, _lts.min()-_pad_l), _lts.max()+_pad_l]),
+            yaxis2=dict(overlaying='y', side='right', showgrid=False, linecolor='#334155',
+                        tickfont=dict(color='#7dd3fc', size=11),
+                        title=dict(text='Kilómetros', font=dict(color='#38bdf8')),
+                        range=[max(0, _kms.min()-_pad_k), _kms.max()+_pad_k]),
+            height=430, margin=dict(l=20, r=25, t=50, b=70), hovermode='x unified')
+        st.plotly_chart(fig_lk, use_container_width=True)
+        st.caption('Eje izquierdo (ámbar) litros · eje derecho (celeste) kilómetros. '
+                   'Si las dos curvas suben y bajan juntas, el consumo acompaña al trabajo hecho; '
+                   'si los litros suben más que los km, el rendimiento empeoró.')
+        # ── gráfico 2: dispersión km vs litros + recta de ajuste ───────────
+        st.markdown('<div class="sec-title">🎯 Relación consumo — cada punto es un mes</div>', unsafe_allow_html=True)
+        fig_disp = go.Figure()
+        if not np.isnan(_slope):
+            _x_fit = np.array([_kms.min(), _kms.max()])
+            _y_fit = _slope*_x_fit + _intercept
+            fig_disp.add_trace(go.Scatter(
+                x=_x_fit, y=_y_fit, mode='lines', name='Tendencia',
+                line=dict(color='#f59e0b', width=2, dash='dash'),
+                hovertemplate='Tendencia<extra></extra>'))
+        fig_disp.add_trace(go.Scatter(
+            x=_kms, y=_lts, mode='markers+text', name='Meses',
+            text=[l if (i in (0, _n_m-1)) else '' for i, l in enumerate(_lbl)],
+            textposition='top center', textfont=dict(color='#94a3b8', size=9),
+            marker=dict(size=12, color=list(range(_n_m)),
+                        colorscale=[[0,'#1e3a8a'],[0.5,'#3b82f6'],[1,'#7dd3fc']],
+                        line=dict(color='#0f172a', width=1.5),
+                        colorbar=dict(title=dict(text='Mes', font=dict(color='#64748b', size=10)),
+                                      tickvals=[0, _n_m-1], ticktext=[_lbl[0], _lbl[-1]],
+                                      tickfont=dict(color='#94a3b8', size=9), thickness=12, len=0.7)),
+            customdata=[[l, float(v)] for l, v in zip(_lbl, serie_kpi['L100'])],
+            hovertemplate='<b>%{customdata[0]}</b><br>KM: %{x:,.0f}<br>Litros: %{y:,.0f}'
+                          '<br>L/100km: %{customdata[1]:.2f}<extra></extra>'))
+        fig_disp.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(30,41,59,0.6)',
+            font=dict(color='#e2e8f0'), showlegend=False,
+            xaxis=dict(gridcolor='#1e293b', linecolor='#334155', tickfont=dict(color='#94a3b8', size=10),
+                       title=dict(text='Kilómetros del mes', font=dict(color='#64748b'))),
+            yaxis=dict(gridcolor='#1e293b', linecolor='#334155', tickfont=dict(color='#94a3b8', size=10),
+                       title=dict(text='Litros del mes', font=dict(color='#64748b'))),
+            height=430, margin=dict(l=20, r=25, t=40, b=60))
+        st.plotly_chart(fig_disp, use_container_width=True)
+        if np.isnan(_slope):
+            _lectura = 'Con menos de 3 meses no se puede estimar la recta de tendencia.'
+        else:
+            _base_txt = (f'y un consumo fijo de ~{_intercept:,.0f} L por mes que no depende de los km '
+                         f'(ralentí, arranques, maniobras)' if _intercept > 0
+                         else 'sin consumo fijo detectable')
+            _dif = _slope*100 - _prom_per
+            _comp = ('por debajo del promedio del período: los meses de más km rinden mejor'
+                     if _dif < -0.5 else
+                     ('por encima del promedio: los meses de más km rinden peor' if _dif > 0.5
+                      else 'en línea con el promedio del período'))
+            _lectura = (f'Cada 100 km adicionales suman ~{_slope*100:.1f} L — {_comp} ({_prom_per:.2f} L/100km) — {_base_txt}. '
+                        f'Los puntos por encima de la recta son meses que gastaron más de lo esperado para esos km; '
+                        f'los de abajo, menos.')
+        st.caption(_lectura)
+        with st.expander('📋 Ver tabla mensual de litros, km y L/100 km'):
+            _tk = serie_kpi[['LABEL','LITROS','KM','L100']].copy()
+            _tk.columns = ['Mes','Litros','KM','L/100 km']
+            _tk['Δ Litros %'] = (_tk['Litros'].pct_change()*100).round(1)
+            _tk['Δ KM %']     = (_tk['KM'].pct_change()*100).round(1)
+            for _c_fmt in ['Litros','KM']:
+                _tk[_c_fmt] = _tk[_c_fmt].apply(lambda x: f'{x:,.0f}')
+            for _c_fmt in ['Δ Litros %','Δ KM %']:
+                _tk[_c_fmt] = _tk[_c_fmt].apply(lambda x: '—' if pd.isna(x) else f'{x:+.1f}%')
+            st.dataframe(_tk, use_container_width=True, hide_index=True)
     st.divider()
     st.markdown(f'<div class="sec-title">Rendimiento por Modelo — {anio_sel}</div>', unsafe_allow_html=True)
     def stats_modelo(patentes_lista):
