@@ -53,12 +53,26 @@ GASTO_COMB_GID      = "1071419143"
 GASTO_COMB_TIPO     = "X10"   # filtro columna F (c tipo)
 DARK_CSS = """
 <style>
+/* Tema oscuro base en .streamlit/config.toml; acá solo ajustes finos.
+   Sin override global de color: los colores de etiquetas/valores se respetan. */
 [data-testid="stAppViewContainer"] { background: #0f172a; }
-[data-testid="stSidebar"] { background: #1e293b; }
 section[data-testid="stMain"] { background: #0f172a; }
-.stMarkdown, .stCaption, label, p, span, div { color: #e2e8f0 !important; }
-[data-testid="stMetricValue"] { color: #f1f5f9 !important; }
-[data-testid="stMetricDelta"] { color: #94a3b8 !important; }
+[data-testid="stHeader"] { background: rgba(15,23,42,0.85); backdrop-filter: blur(6px); }
+[data-testid="stSidebar"] { background: #1e293b; border-right: 1px solid #334155; }
+[data-testid="stSidebar"] [data-baseweb="select"] > div,
+[data-testid="stSidebar"] [data-baseweb="input"] > div {
+    background: #0f172a; border-color: #334155;
+}
+[data-baseweb="popover"] ul, [data-baseweb="menu"] { background: #1e293b !important; }
+[data-baseweb="popover"] li { color: #e2e8f0 !important; }
+[data-baseweb="popover"] li:hover, [data-baseweb="popover"] li[aria-selected="true"] { background: #334155 !important; }
+[data-testid="stSidebar"] label p { color: #cbd5e1; font-weight: 600; }
+[data-testid="stCaptionContainer"], .stCaption { color: #94a3b8; }
+[data-testid="stMetricValue"] { color: #f1f5f9; }
+[data-testid="stMetricLabel"] p { color: #94a3b8; }
+[data-testid="stExpander"] details { border-color: #334155; background: #172033; }
+[data-testid="stDataFrame"] { border: 1px solid #334155; border-radius: 8px; }
+.stTabs [data-baseweb="tab-list"] { border-bottom: 1px solid #334155; }
 .kpi-card {
     background: #1e293b; border-radius: 14px; padding: 24px 28px;
     box-shadow: 0 2px 10px rgba(0,0,0,0.4); text-align: center;
@@ -66,7 +80,8 @@ section[data-testid="stMain"] { background: #0f172a; }
 }
 .kpi-label  { font-size:0.78rem; color:#94a3b8; font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
 .kpi-value  { font-size:2rem; font-weight:800; color:#f1f5f9; line-height:1.1; }
-.kpi-sub    { font-size:0.75rem; color:#64748b; margin-top:4px; }
+.kpi-sub    { font-size:0.78rem; color:#94a3b8; margin-top:6px; }
+.kpi-card   { border: 1px solid #334155; border-left: 5px solid #2563eb; }
 .kpi-red    { border-left-color:#ef4444; }
 .kpi-green  { border-left-color:#22c55e; }
 .kpi-amber  { border-left-color:#f59e0b; }
@@ -104,7 +119,7 @@ section[data-testid="stMain"] { background: #0f172a; }
 }
 .sidebar-filter-header {
     font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px;
-    color:#64748b; margin-bottom:10px; padding:6px 0; border-bottom:1px solid #334155;
+    color:#94a3b8; margin-bottom:10px; padding:6px 0; border-bottom:1px solid #334155;
 }
 [data-testid="stSidebar"] [data-testid="stDateInput"] label,
 [data-testid="stSidebar"] [data-testid="stMultiSelect"] label {
@@ -204,7 +219,19 @@ def cargar_datos():
             df = df.rename(columns=cm).loc[:, ~df.rename(columns=cm).columns.duplicated()]
             if "DOMINIO" in df.columns:
                 df["DOMINIO"] = df["DOMINIO"].apply(normalizar_patente)
-            for col in ["LITROS", "KM", "L100KM", "RALENTI_PCT"]:
+            if "RALENTI_PCT" in df.columns:
+                # Porcentaje: nunca lleva separador de miles, así que '.' y ',' son
+                # decimales. Puede venir como '36,8', '36.8', '36,8%' o fracción '0.368'.
+                serie = df["RALENTI_PCT"]
+                if isinstance(serie, pd.DataFrame):
+                    serie = serie.iloc[:, 0]
+                serie = (serie.astype(str).str.replace("%", "", regex=False).str.strip()
+                              .str.replace(",", ".", regex=False))
+                pct = pd.to_numeric(serie, errors="coerce")
+                if pct.dropna().gt(0).any() and pct[pct > 0].max() <= 1:
+                    pct = pct * 100
+                df["RALENTI_PCT"] = pct.where(pct.between(0, 100)).fillna(0)
+            for col in ["LITROS", "KM", "L100KM"]:
                 if col in df.columns:
                     serie = df[col]
                     if isinstance(serie, pd.DataFrame):
@@ -879,7 +906,7 @@ if pg == "Dashboard Principal":
         <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>Expreso Diemar &mdash; Dashboard LAD {anio_sel}</div>
         <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Telemetría flota LAD &middot; Año {anio_sel} &middot; Actualización automática</div>
         </div>""", unsafe_allow_html=True)
-    st.markdown(f'<div style="margin-bottom:12px;"><span class="price-badge">&#9981; Precio gasoil: <b>${precio_gasoil:,.0f}/L</b></span>&nbsp;&nbsp;<span style="font-size:.75rem;color:#64748b;">Fuente: {precio_fuente}</span></div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="margin-bottom:12px;"><span class="price-badge">&#9981; Precio gasoil: <b>${precio_gasoil:,.0f}/L</b></span>&nbsp;&nbsp;<span style="font-size:.75rem;color:#94a3b8;">Fuente: {precio_fuente}</span></div>', unsafe_allow_html=True)
     st.markdown(f'<div class="sec-title">Métricas Globales — {anio_sel}</div>', unsafe_allow_html=True)
     lts_total  = df['LITROS'].sum() if 'LITROS' in df.columns else 0
     kms_total  = df['KM'].sum()     if 'KM'     in df.columns else 0
@@ -1035,11 +1062,11 @@ if pg == "Dashboard Principal":
             legend=dict(bgcolor='rgba(15,23,42,0.8)', bordercolor='#334155', borderwidth=1,
                         orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
             showlegend=_n_series > 1,
-            xaxis=dict(gridcolor='#1e293b', linecolor='#334155', tickfont=dict(color='#94a3b8', size=10),
-                       title=dict(text='Mes', font=dict(color='#64748b')), tickangle=-45,
+            xaxis=dict(gridcolor='#334155', linecolor='#334155', tickfont=dict(color='#94a3b8', size=10),
+                       title=dict(text='Mes', font=dict(color='#94a3b8')), tickangle=-45,
                        categoryorder='array', categoryarray=_labels_orden),
-            yaxis=dict(gridcolor='#1e293b', linecolor='#334155', tickfont=dict(color='#94a3b8', size=11),
-                       title=dict(text='L/100 km', font=dict(color='#64748b')),
+            yaxis=dict(gridcolor='#334155', linecolor='#334155', tickfont=dict(color='#94a3b8', size=11),
+                       title=dict(text='L/100 km', font=dict(color='#94a3b8')),
                        range=[max(0, _y_min - _pad), _y_max + _pad]),
             height=430, margin=dict(l=20, r=25, t=50, b=70), hovermode='x unified')
         st.plotly_chart(fig_l100, use_container_width=True)
@@ -1136,10 +1163,10 @@ if pg == "Dashboard Principal":
             font=dict(color='#e2e8f0'),
             legend=dict(bgcolor='rgba(15,23,42,0.8)', bordercolor='#334155', borderwidth=1,
                         orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
-            xaxis=dict(gridcolor='#1e293b', linecolor='#334155', tickfont=dict(color='#94a3b8', size=10),
-                       title=dict(text='Mes', font=dict(color='#64748b')), tickangle=-45,
+            xaxis=dict(gridcolor='#334155', linecolor='#334155', tickfont=dict(color='#94a3b8', size=10),
+                       title=dict(text='Mes', font=dict(color='#94a3b8')), tickangle=-45,
                        categoryorder='array', categoryarray=_lbl),
-            yaxis=dict(gridcolor='#1e293b', linecolor='#334155', tickfont=dict(color='#fbbf24', size=11),
+            yaxis=dict(gridcolor='#334155', linecolor='#334155', tickfont=dict(color='#fbbf24', size=11),
                        title=dict(text='Litros', font=dict(color='#f59e0b')),
                        range=[max(0, _lts.min()-_pad_l), _lts.max()+_pad_l]),
             yaxis2=dict(overlaying='y', side='right', showgrid=False, linecolor='#334155',
@@ -1168,7 +1195,7 @@ if pg == "Dashboard Principal":
             marker=dict(size=12, color=list(range(_n_m)),
                         colorscale=[[0,'#1e3a8a'],[0.5,'#3b82f6'],[1,'#7dd3fc']],
                         line=dict(color='#0f172a', width=1.5),
-                        colorbar=dict(title=dict(text='Mes', font=dict(color='#64748b', size=10)),
+                        colorbar=dict(title=dict(text='Mes', font=dict(color='#94a3b8', size=10)),
                                       tickvals=[0, _n_m-1], ticktext=[_lbl[0], _lbl[-1]],
                                       tickfont=dict(color='#94a3b8', size=9), thickness=12, len=0.7)),
             customdata=[[l, float(v)] for l, v in zip(_lbl, serie_kpi['L100'])],
@@ -1177,10 +1204,10 @@ if pg == "Dashboard Principal":
         fig_disp.update_layout(
             paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(30,41,59,0.6)',
             font=dict(color='#e2e8f0'), showlegend=False,
-            xaxis=dict(gridcolor='#1e293b', linecolor='#334155', tickfont=dict(color='#94a3b8', size=10),
-                       title=dict(text='Kilómetros del mes', font=dict(color='#64748b'))),
-            yaxis=dict(gridcolor='#1e293b', linecolor='#334155', tickfont=dict(color='#94a3b8', size=10),
-                       title=dict(text='Litros del mes', font=dict(color='#64748b'))),
+            xaxis=dict(gridcolor='#334155', linecolor='#334155', tickfont=dict(color='#94a3b8', size=10),
+                       title=dict(text='Kilómetros del mes', font=dict(color='#94a3b8'))),
+            yaxis=dict(gridcolor='#334155', linecolor='#334155', tickfont=dict(color='#94a3b8', size=10),
+                       title=dict(text='Litros del mes', font=dict(color='#94a3b8'))),
             height=430, margin=dict(l=20, r=25, t=40, b=60))
         st.plotly_chart(fig_disp, use_container_width=True)
         if np.isnan(_slope):
@@ -1330,8 +1357,8 @@ if pg == "Dashboard Principal":
         fig_ier.add_vline(x=100,line_dash='solid',line_color='#f59e0b',line_width=2.5,
                           annotation_text='Base 100',annotation_position='top',annotation_font_color='#fbbf24',annotation_font_size=11)
         fig_ier.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),barmode='overlay',
-            xaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text='IER  (100 = promedio de su modelo)',font=dict(color='#64748b')),range=[ier_min,ier_max]),
-            yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8',size=10),categoryorder='array',categoryarray=df_ier_sorted['DOMINIO'].tolist()),
+            xaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8'),title=dict(text='IER  (100 = promedio de su modelo)',font=dict(color='#94a3b8')),range=[ier_min,ier_max]),
+            yaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8',size=10),categoryorder='array',categoryarray=df_ier_sorted['DOMINIO'].tolist()),
             height=max(380,len(df_ier_sorted)*44),margin=dict(l=10,r=130,t=60,b=30),showlegend=False)
         st.plotly_chart(fig_ier, use_container_width=True)
         st.caption('Verde = mejor que su modelo · Rojo = peor · Línea amarilla = base 100 · Hover para detalle completo')
@@ -1473,8 +1500,8 @@ if pg == "Dashboard Principal":
             text=vel_rank['SEVERIDAD'].round(0).astype(int),textposition='outside',textfont=dict(color='#e2e8f0',size=10),
             hovertemplate='<b>%{x}</b><br>Severidad total: +%{y:.0f} km/h acumulados sobre límite<extra></extra>')])
         fig_vel.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
-            xaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8',size=10),tickangle=-45),
-            yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text=f'km/h acumulados sobre {LIMITE_VELOCIDAD} km/h',font=dict(color='#64748b'))),
+            xaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8',size=10),tickangle=-45),
+            yaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8'),title=dict(text=f'km/h acumulados sobre {LIMITE_VELOCIDAD} km/h',font=dict(color='#94a3b8'))),
             height=380,margin=dict(l=10,r=10,t=20,b=80),showlegend=False)
         st.plotly_chart(fig_vel, use_container_width=True)
         with st.expander('Ver tabla de excesos por unidad'):
@@ -1511,8 +1538,8 @@ if pg == "Dashboard Principal":
                     line=dict(color='#f59e0b',width=2,dash='dash'),hoverinfo='skip'))
             fig_sc.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
                 legend=dict(bgcolor='rgba(15,23,42,0.8)',bordercolor='#334155',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
-                xaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text='Score conducción (/10) — mayor = mejor →',font=dict(color='#64748b'))),
-                yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text='L/100km — menor = más eficiente ↓',font=dict(color='#64748b'))),
+                xaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8'),title=dict(text='Score conducción (/10) — mayor = mejor →',font=dict(color='#94a3b8'))),
+                yaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8'),title=dict(text='L/100km — menor = más eficiente ↓',font=dict(color='#94a3b8'))),
                 height=460,margin=dict(l=10,r=10,t=50,b=50))
             st.plotly_chart(fig_sc, use_container_width=True)
             st.caption('Cada punto = una patente · Tendencia negativa esperada: mejor conducción → menor consumo')
@@ -1588,8 +1615,8 @@ if pg == "Dashboard Principal":
             _prom=_gp['GASTO'].mean()
             fig_arr.add_hline(y=_prom,line_dash='dot',line_color='#f59e0b',line_width=2,annotation_text=f'Prom: ${_prom:,.0f}',annotation_position='top right',annotation_font_color='#fbbf24',annotation_font_size=11)
             fig_arr.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
-                xaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8',size=10),tickangle=-45),
-                yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text='Gasto en arreglos ($)',font=dict(color='#64748b'))),
+                xaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8',size=10),tickangle=-45),
+                yaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8'),title=dict(text='Gasto en arreglos ($)',font=dict(color='#94a3b8'))),
                 height=420,margin=dict(l=10,r=10,t=30,b=80),showlegend=False)
             st.plotly_chart(fig_arr, use_container_width=True)
             st.caption('🔴 Mayor gasto · 🟠 Resto · Línea amarilla = promedio flota · Fuente: Google Sheet de arreglos')
@@ -1618,7 +1645,7 @@ elif pg == "Modelo Predictivo":
         <div style='font-size:1.6rem;font-weight:800;color:#f1f5f9;'>Modelo Predictivo &mdash; LAD</div>
         <div style='font-size:.9rem;color:#94a3b8;margin-top:4px;'>Entrenado con todo el histórico &middot; Regresión polinomial &middot; Simulador What-If</div>
         </div>""", unsafe_allow_html=True)
-    st.markdown(f'<span class="price-badge">&#9981; Precio gasoil: <b>${precio_gasoil:,.0f}/L</b></span>&nbsp;&nbsp;<span style="font-size:.75rem;color:#64748b;">Fuente: {precio_fuente}</span>', unsafe_allow_html=True)
+    st.markdown(f'<span class="price-badge">&#9981; Precio gasoil: <b>${precio_gasoil:,.0f}/L</b></span>&nbsp;&nbsp;<span style="font-size:.75rem;color:#94a3b8;">Fuente: {precio_fuente}</span>', unsafe_allow_html=True)
     anos_en_hist=(sorted(df_full_clean['FECHA'].dt.year.unique().tolist()) if 'FECHA' in df_full_clean.columns else [])
     anos_str=" · ".join(str(a) for a in anos_en_hist)
     st.markdown(f'<div class="training-badge">🧠 Modelo entrenado con {n_meses_entrenamiento} meses históricos ({anos_str})</div>', unsafe_allow_html=True)
@@ -1642,7 +1669,7 @@ elif pg == "Modelo Predictivo":
             c.markdown(f'''<div class="kpi-card kpi-purple" style="padding:16px 18px;">
               <div class="kpi-label">Predicción {mes}</div>
               <div style="font-size:1.55rem;font-weight:800;color:#f1f5f9;line-height:1.15;margin-top:2px;">{l100_p:.2f} <span style="font-size:.85rem;color:#94a3b8;font-weight:600;">L/100km</span></div>
-              <div style="font-size:.78rem;color:#64748b;margin-top:6px;">{lts_p:,.0f} L · ${costo_p/1e6:.2f}M</div>
+              <div style="font-size:.78rem;color:#94a3b8;margin-top:6px;">{lts_p:,.0f} L · ${costo_p/1e6:.2f}M</div>
             </div>''', unsafe_allow_html=True)
         for _row_start in range(0, n_pred, 4):
             _cols = st.columns(4)
@@ -1708,8 +1735,8 @@ elif pg == "Modelo Predictivo":
                 fig.add_vline(x=yr_label,line_width=1,line_dash='dot',line_color='#334155',annotation_text=str(yr),annotation_position='top',annotation_font_color='#64748b',annotation_font_size=10)
         fig.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
             legend=dict(bgcolor='rgba(15,23,42,0.8)',bordercolor='#334155',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
-            xaxis=dict(gridcolor='#1e293b',linecolor='#334155',tickfont=dict(color='#94a3b8',size=10),title=dict(text='Período',font=dict(color='#64748b')),tickangle=-45),
-            yaxis=dict(gridcolor='#1e293b',linecolor='#334155',tickfont=dict(color='#94a3b8',size=11),title=dict(text='L/100km',font=dict(color='#64748b'))),
+            xaxis=dict(gridcolor='#334155',linecolor='#334155',tickfont=dict(color='#94a3b8',size=10),title=dict(text='Período',font=dict(color='#94a3b8')),tickangle=-45),
+            yaxis=dict(gridcolor='#334155',linecolor='#334155',tickfont=dict(color='#94a3b8',size=11),title=dict(text='L/100km',font=dict(color='#94a3b8'))),
             height=450,margin=dict(l=10,r=10,t=50,b=60),hovermode='x unified')
         st.plotly_chart(fig, use_container_width=True)
         st.caption(f'±1.5σ intervalo de confianza | Línea roja = histórico ({n_meses_entrenamiento} meses) | Línea azul = predicción')
@@ -1799,8 +1826,8 @@ elif pg == "Análisis por Patente":
     promedio_flota=resumen['L100KM_PROM'].mean()
     fig_bar.add_hline(y=promedio_flota,line_dash='dot',line_color='#f59e0b',line_width=2,annotation_text=f'Promedio flota: {promedio_flota:.2f}',annotation_position='top right',annotation_font_color='#fbbf24',annotation_font_size=11)
     fig_bar.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
-        xaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8',size=10),tickangle=-45),
-        yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text='L/100km',font=dict(color='#64748b'))),
+        xaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8',size=10),tickangle=-45),
+        yaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8'),title=dict(text='L/100km',font=dict(color='#94a3b8'))),
         height=420,margin=dict(l=10,r=10,t=30,b=80),showlegend=False)
     st.plotly_chart(fig_bar, use_container_width=True)
     st.caption('🔴 Mayor consumo · 🟢 Menor consumo · 🔵 Resto · Línea amarilla = promedio flota')
@@ -1850,12 +1877,12 @@ elif pg == "Análisis por Patente":
                 sc_color=('#22c55e' if ier_v>=105 else ('#f59e0b' if ier_v>=95 else ('#f97316' if ier_v>=85 else '#ef4444')))
                 ia1,ia2,ia3=st.columns([1,2,2])
                 with ia1:
-                    st.markdown(f'<div class="ier-gauge-wrap"><div class="kpi-label">IER v7</div><div class="ier-score-big" style="color:{sc_color};">{ier_v:.1f}</div><div class="ier-clasif">{ier_row["CLASIFICACION"]}</div><div style="font-size:.72rem;color:#64748b;margin-top:6px;">base 100 = prom. {modelo_pat}</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="ier-gauge-wrap"><div class="kpi-label">IER v7</div><div class="ier-score-big" style="color:{sc_color};">{ier_v:.1f}</div><div class="ier-clasif">{ier_row["CLASIFICACION"]}</div><div style="font-size:.72rem;color:#94a3b8;margin-top:6px;">base 100 = prom. {modelo_pat}</div></div>', unsafe_allow_html=True)
                 with ia2:
                     st.markdown('<div style="font-size:.8rem;color:#94a3b8;font-weight:600;margin-bottom:6px;">Componentes del IER (50/40/10)</div>', unsafe_allow_html=True)
                     def comp_bar(label,score,peso):
                         pct=min(int(score*50),100); bc='#22c55e' if score>=1 else '#ef4444'
-                        st.markdown(f'<div class="ier-comp-row"><div class="ier-comp-label">{label} <span style="color:#475569;">({peso}%)</span></div><div class="ier-comp-bar-bg"><div class="ier-comp-bar" style="width:{pct}%;background:{bc}"></div></div><div class="ier-comp-val" style="color:{bc};">{score*100:.0f}</div></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="ier-comp-row"><div class="ier-comp-label">{label} <span style="color:#94a3b8;">({peso}%)</span></div><div class="ier-comp-bar-bg"><div class="ier-comp-bar" style="width:{pct}%;background:{bc}"></div></div><div class="ier-comp-val" style="color:{bc};">{score*100:.0f}</div></div>', unsafe_allow_html=True)
                     comp_bar('📦 Eficiencia (ton·km/L)',ier_row['SCORE_CONSUMO'],50)
                     comp_bar('🎯 Score conducción',ier_row['SCORE_MANEJO'],40)
                     comp_bar(f'🚨 Severidad vel.',ier_row['SCORE_VEL'],10)
@@ -1897,8 +1924,8 @@ elif pg == "Análisis por Patente":
             fig_pat.add_trace(go.Scatter(x=df_pat_mes['MES_STR'],y=df_pat_mes['L100'],name='L/100km',mode='lines+markers',line=dict(color='#ef4444',width=2.5),marker=dict(size=8,color='#ef4444',line=dict(color='#fff',width=1.5)),hovertemplate='%{x}<br>L/100km: <b>%{y:.2f}</b><extra></extra>'))
             fig_pat.add_hline(y=l100_prom_pat,line_dash='dot',line_color='#f59e0b',annotation_text=f'Prom: {l100_prom_pat:.2f}',annotation_font_color='#fbbf24')
             fig_pat.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
-                xaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8',size=10),tickangle=-30),
-                yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text='L/100km',font=dict(color='#ef4444'))),
+                xaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8',size=10),tickangle=-30),
+                yaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8'),title=dict(text='L/100km',font=dict(color='#ef4444'))),
                 yaxis2=dict(overlaying='y',side='right',tickfont=dict(color='#3b82f6'),title=dict(text='Litros',font=dict(color='#3b82f6')),showgrid=False),
                 legend=dict(bgcolor='rgba(15,23,42,0.8)',bordercolor='#334155',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
                 height=370,margin=dict(l=10,r=50,t=40,b=50))
@@ -2037,10 +2064,10 @@ elif pg == "Datos Operativos":
         fig_mat.add_vline(x=_l100_med, line_dash='dash', line_color='#64748b', line_width=1.5)
         fig_mat.add_hline(y=_kgkm_med, line_dash='dash', line_color='#64748b', line_width=1.5)
         fig_mat.add_annotation(x=_l100_med,y=_y_max,text=f'mediana L/100km = {_l100_med:.1f}',
-            showarrow=False, yanchor='bottom', font=dict(size=9,color='#64748b'),
+            showarrow=False, yanchor='bottom', font=dict(size=9,color='#94a3b8'),
             bgcolor='rgba(15,23,42,0.7)', borderpad=3)
         fig_mat.add_annotation(x=_x_min,y=_kgkm_med,text=f'mediana kg/km = {_kgkm_med:.0f}',
-            showarrow=False, xanchor='left', font=dict(size=9,color='#64748b'),
+            showarrow=False, xanchor='left', font=dict(size=9,color='#94a3b8'),
             bgcolor='rgba(15,23,42,0.7)', borderpad=3)
         fig_mat.add_trace(go.Scatter(
             x=_mat['L100KM'], y=_mat['KG_KM'],
@@ -2064,10 +2091,10 @@ elif pg == "Datos Operativos":
             showlegend=False
         ))
         fig_mat.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(30,41,59,0.6)', font=dict(color='#e2e8f0'),
-            xaxis=dict(gridcolor='#1e293b', tickfont=dict(color='#94a3b8',size=11),
+            xaxis=dict(gridcolor='#334155', tickfont=dict(color='#94a3b8',size=11),
                 title=dict(text='L / 100 km   —   litros consumidos por cada 100 km   (← menor = más eficiente)', font=dict(color='#94a3b8',size=11)),
                 range=[_x_min,_x_max]),
-            yaxis=dict(gridcolor='#1e293b', tickfont=dict(color='#94a3b8',size=11),
+            yaxis=dict(gridcolor='#334155', tickfont=dict(color='#94a3b8',size=11),
                 title=dict(text='kg / km   —   kg de carga entregados por km   (↑ mayor = más productivo)', font=dict(color='#94a3b8',size=11)),
                 range=[_y_min,_y_max]),
             height=560, margin=dict(l=70,r=50,t=40,b=70))
@@ -2086,7 +2113,7 @@ elif pg == "Datos Operativos":
                 st.markdown(f"""
                 <div style="background:#1e293b;border-radius:12px;padding:16px;border-left:5px solid {_bc};margin-bottom:12px;">
                   <div style="font-size:.95rem;font-weight:800;color:#f1f5f9;">{_r['DOMINIO']}</div>
-                  <div style="font-size:.72rem;color:#64748b;margin-bottom:8px;">{_r['MODELO']}</div>
+                  <div style="font-size:.72rem;color:#94a3b8;margin-bottom:8px;">{_r['MODELO']}</div>
                   <div style="font-size:1.1rem;font-weight:700;color:{_bc};margin-bottom:6px;">{_r['CUAD_LABEL']}</div>
                   <div style="font-size:.75rem;color:#94a3b8;line-height:1.5;">
                     L/100km: <b style="color:#f1f5f9;">{_r['L100KM']:.2f}</b><br>
@@ -2133,8 +2160,8 @@ elif pg == "Datos Operativos":
         dom=row['DOMINIO']; vals=[row.get(m,0) for m in meses_cols]
         fig_bar_c.add_trace(go.Bar(name=dom,x=meses_cols,y=vals,marker_color=COLORES_PAT[i%len(COLORES_PAT)],hovertemplate=f'<b>{dom}</b><br>%{{x}}: <b>%{{y:,.1f}} ton</b><extra></extra>'))
     fig_bar_c.update_layout(barmode='stack',paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
-        xaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8',size=10),tickangle=-45),
-        yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text='Toneladas entregadas',font=dict(color='#64748b'))),
+        xaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8',size=10),tickangle=-45),
+        yaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8'),title=dict(text='Toneladas entregadas',font=dict(color='#94a3b8'))),
         legend=dict(bgcolor='rgba(15,23,42,0.8)',bordercolor='#334155',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
         height=420,margin=dict(l=10,r=10,t=50,b=70))
     st.plotly_chart(fig_bar_c, use_container_width=True)
@@ -2166,8 +2193,8 @@ elif pg == "Datos Operativos":
     if not tkml_valid.empty:
         fig_tkml.add_hline(y=tkml_valid.mean(),line_dash='dot',line_color='#f59e0b',line_width=2,annotation_text=f'Promedio: {tkml_valid.mean():.2f}',annotation_position='top right',annotation_font_color='#fbbf24',annotation_font_size=11)
     fig_tkml.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
-        xaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8',size=10),tickangle=-30),
-        yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text='ton·km/L',font=dict(color='#64748b'))),
+        xaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8',size=10),tickangle=-30),
+        yaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8'),title=dict(text='ton·km/L',font=dict(color='#94a3b8'))),
         legend=dict(bgcolor='rgba(15,23,42,0.8)',bordercolor='#334155',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
         height=400,margin=dict(l=10,r=10,t=50,b=50))
     st.plotly_chart(fig_tkml, use_container_width=True)
@@ -2182,8 +2209,8 @@ elif pg == "Datos Operativos":
         prom_r=rank_tkml['TONKML_ANUAL'].mean()
         fig_rank.add_vline(x=prom_r,line_dash='dot',line_color='#f59e0b',line_width=2,annotation_text=f'Prom: {prom_r:.2f}',annotation_position='top',annotation_font_color='#fbbf24',annotation_font_size=11)
         fig_rank.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
-            xaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8'),title=dict(text='ton·km/L acumulado año',font=dict(color='#64748b'))),
-            yaxis=dict(gridcolor='#1e293b',tickfont=dict(color='#94a3b8',size=10)),
+            xaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8'),title=dict(text='ton·km/L acumulado año',font=dict(color='#94a3b8'))),
+            yaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8',size=10)),
             height=max(300,len(rank_tkml)*50+80),margin=dict(l=10,r=120,t=30,b=30),showlegend=False)
         st.plotly_chart(fig_rank, use_container_width=True)
     st.caption(f'Fuente: reporte_hojas.xlsx (BI Expreso) · Telemetría Google Sheets · Período {_rango_txt}')
