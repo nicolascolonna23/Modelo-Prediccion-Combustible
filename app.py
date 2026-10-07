@@ -356,6 +356,22 @@ def cargar_velocidad():
         if "LON" in df.columns:
             mask = df["LON"].abs() > 180
             df.loc[mask, "LON"] = df.loc[mask, "LON"] / 100
+        # Coordenada exacta desde html_LatLng ("...@-33.8983,-59.4740"): en algunos
+        # meses Latitud/Longitud vienen redondeadas a enteros (-34 / -59).
+        _col_ll = next((c for c in df.columns if "latlng" in str(c).lower()), None)
+        if _col_ll is not None:
+            _ll = df[_col_ll].astype(str).str.extract(r'@\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)')
+            _lat_p = pd.to_numeric(_ll[0], errors="coerce")
+            _lon_p = pd.to_numeric(_ll[1], errors="coerce")
+            _ok = _lat_p.between(-55, -21) & _lon_p.between(-74, -53)
+            if "LAT" in df.columns and "LON" in df.columns:
+                df["LAT"] = _lat_p.where(_ok, df["LAT"])
+                df["LON"] = _lon_p.where(_ok, df["LON"])
+            else:
+                df["LAT"], df["LON"] = _lat_p.where(_ok), _lon_p.where(_ok)
+            diag["n_coords_precisas"] = int(_ok.sum())
+            if "LAT" in df.columns:
+                diag["n_lat_validas"] = int(df["LAT"].between(-55,-21).sum())
         # Fallback: detectar VELOCIDAD por heurística
         if "VELOCIDAD" not in df.columns:
             for c in df.columns:
@@ -873,16 +889,27 @@ meses_hist_full['L100'] = (meses_hist_full['LITROS']/meses_hist_full['KM'].repla
 meses_hist_full = meses_hist_full[meses_hist_full['KM']>0].copy()
 n_meses_entrenamiento = len(meses_hist_full)
 if not df.empty and not df_vel_anio.empty and 'FECHA' in df_vel_anio.columns:
-    _mes_min = df['FECHA'].dropna().dt.to_period('M').min()
-    _mes_max = df['FECHA'].dropna().dt.to_period('M').max()
-    # Si "Hasta" es el último mes con telemetría, los excesos no se cortan ahí:
-    # la planilla de excesos suele tener meses que la telemetría todavía no cargó.
-    _ult_tel = df_full.loc[df_full['FECHA'].dt.year==anio_sel, 'FECHA'].dropna().dt.to_period('M').max()
+    # Los excesos se filtran por lo elegido en la barra lateral, no por los meses
+    # o patentes que tenga la telemetría (la planilla de excesos suele ir adelantada).
+    _mes_min = st.session_state.get('desde_periodo', None)
     _hasta_sel = st.session_state.get('hasta_periodo', None)
+    _ult_tel = df_full.loc[df_full['FECHA'].dt.year==anio_sel, 'FECHA'].dropna().dt.to_period('M').max()
+    if _mes_min is None:
+        _mes_min = pd.Period(f'{anio_sel}-01', 'M')
     if _hasta_sel is None or pd.isna(_ult_tel) or _hasta_sel >= _ult_tel:
-        _mes_max = pd.Period(f'{anio_sel}-12', 'M')
+        _mes_max = pd.Period(f'{anio_sel}-12', 'M')   # "Hasta" en el último mes = hasta hoy
+    else:
+        _mes_max = _hasta_sel
     _vel_periodos = df_vel_anio['FECHA'].dt.to_period('M')
-    df_vel_filtrado = df_vel_anio[(_vel_periodos>=_mes_min)&(_vel_periodos<=_mes_max)&(df_vel_anio['DOMINIO'].isin(df['DOMINIO'].unique()))].copy()
+    _mask_vel = (_vel_periodos>=_mes_min)&(_vel_periodos<=_mes_max)
+    _mask_vel &= df_vel_anio['DOMINIO'].isin(df_full['DOMINIO'].dropna().unique())   # solo flota con telemetría
+    _pats_sel = st.session_state.get('patentes_sel') or []
+    _marcas_sel = st.session_state.get('marcas_sel') or []
+    if _pats_sel:
+        _mask_vel &= df_vel_anio['DOMINIO'].isin(_pats_sel)
+    elif 'MARCA' in df_full.columns and _marcas_sel and set(_marcas_sel) != set(df_full['MARCA'].dropna().unique()):
+        _mask_vel &= df_vel_anio['DOMINIO'].isin(df_full.loc[df_full['MARCA'].isin(_marcas_sel), 'DOMINIO'].unique())
+    df_vel_filtrado = df_vel_anio[_mask_vel].copy()
 else:
     df_vel_filtrado = df_vel_anio.copy()
 if not df_manejo_raw.empty and 'MES' in df_manejo_raw.columns and not df.empty:
