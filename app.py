@@ -33,6 +33,9 @@ URL_UNID = f"{BASE_URL}&gid={GID_UNID}"
 # Hoja "EXCESOS DE VELOCIDAD" en spreadsheet propio: usar gviz (funciona con compartido por link)
 VEL_SHEET_ID = "1u7cckay0IJ60bfoKk2OZo-TjCvTbH9O1wKxNFdSKDCQ"
 URL_VEL  = f"https://docs.google.com/spreadsheets/d/{VEL_SHEET_ID}/gviz/tq?tqx=out:csv&gid={GID_VEL}"
+# export devuelve el texto tal cual se ve; gviz infiere un tipo por columna y deja
+# vacías las celdas que no coinciden (ej. fechas pegadas como texto en un mes nuevo)
+URL_VEL_EXPORT = f"https://docs.google.com/spreadsheets/d/{VEL_SHEET_ID}/export?format=csv&gid={GID_VEL}"
 CARGA_URL = "http://bi.sistemaexpreso.com.ar/reporte_hojas.xlsx"
 # ── DATOS MANEJO (Score Conducción) ───────────────────────────────────────
 MANEJO_SHEET_ID = "1teVcN0ejyvGbjWwWOHTmZ8I-17xyGZ0d8hxJ7dwSKm0"
@@ -155,6 +158,26 @@ def normalizar_patente(valor):
     import re
     s = str(valor).strip().upper()
     return re.sub(r'[^A-Z0-9]', '', s)
+def parse_fecha_mixta(serie):
+    """Fechas día-primero con formatos mezclados en la misma columna
+       ('1/02/2026 3:31:48', '01/09/2026 03:31', '2026-09-01 03:31:48',
+       serial de Sheets 46266.14...). pd.to_datetime a secas toma el formato
+       de la primera fila y descarta (NaT) las que vienen distinto."""
+    s = serie.astype(str).str.strip().str.replace('\xa0', ' ', regex=False)
+    s = s.replace({'': np.nan, 'nan': np.nan, 'None': np.nan, 'NaT': np.nan})
+    # ISO (año primero) no debe leerse con dayfirst
+    es_iso = s.str.match(r'^\d{4}-\d{1,2}-\d{1,2}', na=False)
+    try:
+        out = pd.to_datetime(s.where(~es_iso), errors='coerce', dayfirst=True, format='mixed')
+    except (TypeError, ValueError):
+        out = s.where(~es_iso).apply(lambda v: pd.to_datetime(v, errors='coerce', dayfirst=True))
+    out = out.where(~es_iso, pd.to_datetime(s.where(es_iso), errors='coerce'))
+    # números de serie de Google Sheets / Excel (días desde 1899-12-30)
+    num = pd.to_numeric(s.str.replace(',', '.', regex=False), errors='coerce')
+    es_serial = out.isna() & num.between(30000, 80000)
+    if es_serial.any():
+        out = out.where(~es_serial, pd.Timestamp('1899-12-30') + pd.to_timedelta(num.where(es_serial), unit='D'))
+    return pd.to_datetime(out, errors='coerce')
 @st.cache_data(ttl=600)
 def cargar_datos():
     try:
@@ -242,8 +265,20 @@ def cargar_velocidad():
             "muestra_raw": None, "muestra_proc": None,
             "n_lat_validas": 0, "n_vel_validas": 0}
     try:
-        r = requests.get(URL_VEL, timeout=20,
-                         headers={"User-Agent": "Mozilla/5.0"})
+        r = None
+        for _url in (URL_VEL_EXPORT, URL_VEL):
+            try:
+                _r = requests.get(_url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+            except Exception:
+                continue
+            r = _r
+            if _r.status_code == 200 and not _r.text.lstrip().lower().startswith(("<!doctype","<html")):
+                diag["url"] = _url
+                break
+        if r is None:
+            diag["err"] = "Sin respuesta de Google Sheets"
+            return pd.DataFrame(columns=["DOMINIO","FECHA","VELOCIDAD","EXCESO_KMH","LAT","LON","UBICACION"]), diag
+        r.encoding = "utf-8"
         diag["status"] = r.status_code
         if r.status_code != 200:
             diag["err"] = f"HTTP {r.status_code}"
@@ -273,7 +308,11 @@ def cargar_velocidad():
         if "DOMINIO" in df.columns:
             df["DOMINIO"] = df["DOMINIO"].apply(normalizar_patente)
         if "FECHA" in df.columns:
-            df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce", dayfirst=True)
+            _fecha_txt = df["FECHA"].copy()
+            df["FECHA"] = parse_fecha_mixta(df["FECHA"])
+            _malas = _fecha_txt[df["FECHA"].isna() & _fecha_txt.notna()]
+            diag["n_fechas_invalidas"] = int(len(_malas))
+            diag["muestra_fechas_invalidas"] = _malas.astype(str).head(10).tolist()
         # Parser formato AR (coma decimal) para LAT/LON/VELOCIDAD
         def parse_ar(serie):
             s = serie.astype(str).str.strip()
@@ -809,7 +848,13 @@ n_meses_entrenamiento = len(meses_hist_full)
 if not df.empty and not df_vel_anio.empty and 'FECHA' in df_vel_anio.columns:
     _mes_min = df['FECHA'].dropna().dt.to_period('M').min()
     _mes_max = df['FECHA'].dropna().dt.to_period('M').max()
-    _vel_periodos = df_vel_anio['FECHA'].dropna().dt.to_period('M')
+    # Si "Hasta" es el último mes con telemetría, los excesos no se cortan ahí:
+    # la planilla de excesos suele tener meses que la telemetría todavía no cargó.
+    _ult_tel = df_full.loc[df_full['FECHA'].dt.year==anio_sel, 'FECHA'].dropna().dt.to_period('M').max()
+    _hasta_sel = st.session_state.get('hasta_periodo', None)
+    if _hasta_sel is None or pd.isna(_ult_tel) or _hasta_sel >= _ult_tel:
+        _mes_max = pd.Period(f'{anio_sel}-12', 'M')
+    _vel_periodos = df_vel_anio['FECHA'].dt.to_period('M')
     df_vel_filtrado = df_vel_anio[(_vel_periodos>=_mes_min)&(_vel_periodos<=_mes_max)&(df_vel_anio['DOMINIO'].isin(df['DOMINIO'].unique()))].copy()
 else:
     df_vel_filtrado = df_vel_anio.copy()
@@ -2344,8 +2389,14 @@ elif pg == "🔧 Diagnóstico":
     Filas raw: {vel_diag.get('raw_rows')} · Tras parse fecha (no nulas): {vel_diag.get('tras_fecha')} · Vel válidas: {vel_diag.get('n_vel_validas')} · LAT en rango AR: {vel_diag.get('n_lat_validas')}<br>
     Tras filtro &gt;{LIMITE_VELOCIDAD} km/h: <b>{vel_diag.get('tras_velocidad_gt_limite')}</b> · Tras dropna(DOMINIO,FECHA): <b>{vel_diag.get('tras_filtros')}</b><br>
     Columnas raw: <code>{vel_diag.get('raw_cols')}</code><br>
-    Columnas mapeadas: <code>{vel_diag.get('mapped_cols')}</code>
+    Columnas mapeadas: <code>{vel_diag.get('mapped_cols')}</code><br>
+    Fuente usada: <code>{vel_diag.get('url')}</code> · Fechas ilegibles: <b>{vel_diag.get('n_fechas_invalidas', 0)}</b>
     </div>""", unsafe_allow_html=True)
+    if vel_diag.get('muestra_fechas_invalidas'):
+        st.caption(f"Ejemplos de fechas que no se pudieron leer: {vel_diag['muestra_fechas_invalidas']}")
+    if _ok_vel and 'FECHA' in df_vel_raw.columns:
+        _vm = df_vel_raw['FECHA'].dt.to_period('M').value_counts().sort_index()
+        st.caption('Eventos por mes: ' + ' · '.join(f'{p}: {n}' for p, n in _vm.items()))
     if vel_diag.get('muestra_raw') is not None:
         st.caption('Muestra raw (primeras 5 filas tal como llegaron):')
         st.dataframe(vel_diag['muestra_raw'], use_container_width=True, hide_index=True)
