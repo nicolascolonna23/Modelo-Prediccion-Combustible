@@ -1502,6 +1502,30 @@ if pg == "Dashboard Principal":
     <b>Datos faltantes:</b> si falta un componente, su peso se reparte entre los otros componentes de conducta, no al consumo.<br>
     <b>Escala:</b>&nbsp;🟢 Eficiente ≥105 &nbsp;·&nbsp; 🟡 Normal 95–105 &nbsp;·&nbsp; 🟠 Atención 85–95 &nbsp;·&nbsp; 🔴 Crítico &lt;85
     </div>""", unsafe_allow_html=True)
+    with st.expander('🧮 ¿Cómo se calcula el IER? (explicado simple)'):
+        st.markdown(f"""<div class="ier-method-box">
+        <b>La idea:</b> el IER mide solo lo que depende del chofer. Lo que no depende de él
+        (el camión, el viento, el peso, la ruta) se descuenta antes de comparar.<br><br>
+        <b>Paso 1 — ¿Cuánto debería gastar este camión?</b><br>
+        • Se toma lo que gastaron en promedio los camiones <b>del mismo modelo, en el mismo mes</b>.
+        Si en julio hubo mucho viento, todos gastaron más y nadie sale perjudicado.<br>
+        • Si llevó <b>más peso por viaje</b> que el resto, se le permite gastar un poco más
+        (y si llevó menos, un poco menos). Como máximo ±{IER_TOPE_CARGA*100:.0f}%.<br>
+        • Si hizo <b>rutas más pesadas</b> (subidas, ripio, ciudad), también se le permite gastar más. Como máximo ±{IER_TOPE_RUTA*100:.0f}%.<br>
+        • Un peso cargado con error (por ejemplo 280 t en un viaje) se ignora: ese viaje no cuenta para el peso.<br><br>
+        <b>Paso 2 — ¿Cuánto gastó de verdad?</b><br>
+        Se compara el consumo real contra el esperado. Ejemplo: esperado 34 L/100km, real 33 → gastó <b>3% menos</b> de lo esperado (bien).<br><br>
+        <b>Paso 3 — Se suman los hábitos del chofer</b><br>
+        • <b>40%</b> Consumo real vs. esperado (paso 2)<br>
+        • <b>25%</b> Score de conducción (aceleraciones, frenadas, uso del motor)<br>
+        • <b>20%</b> Ralentí: porcentaje del combustible gastado con el camión parado y el motor en marcha<br>
+        • <b>15%</b> Velocidad: cuánto y cuántas veces pasó el límite<br>
+        Si falta algún dato (por ejemplo, no hay score de conducción), ese porcentaje se reparte entre los otros hábitos.<br><br>
+        <b>Paso 4 — Resultado</b><br>
+        Cada camión se compara solo con los de su modelo. <b>100 = igual al promedio</b>. Más de 100 = mejor que el promedio, menos de 100 = peor.<br>
+        Si el camión hizo pocos km, su resultado se acerca a 100, porque con pocos datos no se puede afirmar que sea bueno ni malo.<br><br>
+        🟢 105 o más: Eficiente &nbsp;·&nbsp; 🟡 95–105: Normal &nbsp;·&nbsp; 🟠 85–95: Atención &nbsp;·&nbsp; 🔴 menos de 85: Crítico
+        </div>""", unsafe_allow_html=True)
     with st.expander('ℹ️ ¿Por qué Z-Score + Tanh? (metodología)'):
         st.markdown("""<div class="ier-method-box">
         <b>Problema del ratio simple:</b><br>
@@ -2084,7 +2108,7 @@ elif pg == "Análisis por Patente":
                         delta_man = sc_man_v - (sc_man_m if pd.notnull(sc_man_m) else sc_man_v)
                         st.metric('🎯 Score conducción',f"{sc_man_v:.2f}/10",f"{delta_man:+.2f} vs prom. {modelo_pat} ({sc_man_m:.2f})" if pd.notnull(sc_man_m) else 'sin promedio',delta_color='normal')
                     else:
-                        st.metric('🎯 Score conducción','sin datos','score neutral (1.0)')
+                        st.metric('🎯 Score conducción','sin datos','peso redistribuido a los otros componentes')
                     if ier_row['TIENE_RALENTI']:
                         _ral_m = ier_row.get('RALENTI_MOD', np.nan)
                         st.metric('⏱️ % Ralentí',f"{ier_row['RALENTI_PCT']:.1f}%",
@@ -2350,13 +2374,17 @@ elif pg == "Datos Operativos":
     st.plotly_chart(fig_bar_c, use_container_width=True)
     st.divider()
     st.markdown(f'<div class="sec-title">📐 Detalle ton·km/L (Productividad de Carga) — {_rango_txt}</div>', unsafe_allow_html=True)
-    st.markdown("""<div class="ier-info-box"><b>¿Qué es ton·km/L?</b> Mide cuántas toneladas·kilómetro se transportan por cada litro de combustible.<br><b>Fórmula:</b> ton·km/L = Peso entregado (ton) × KM recorridos / Litros consumidos</div>""", unsafe_allow_html=True)
+    st.markdown(f"""<div class="ier-info-box"><b>¿Qué es ton·km/L?</b> Mide cuántas toneladas·kilómetro se transportan por cada litro de combustible.<br><b>Fórmula:</b> ton·km/L = Peso promedio por viaje (ton) × KM recorridos / Litros consumidos.<br>Se usa el peso <b>promedio por viaje</b> (los viajes vacíos cuentan como 0 t), no la suma de todas las toneladas del mes: así hacer más viajes no infla el indicador. Pesos imposibles por viaje (entre 0 y {CARGA_MIN_TON_VIAJE:.0f} t o más de {CARGA_MAX_TON_VIAJE:.0f} t) se descartan como error de carga.</div>""", unsafe_allow_html=True)
     df_op=df[df['KM']>0].copy(); df_op['MES_STR']=df_op['FECHA'].dt.to_period('M').astype(str)
     km_lts_mes=df_op.groupby(['DOMINIO','MES_STR']).agg(KM=('KM','sum'),LITROS=('LITROS','sum')).reset_index()
-    df_carga_str=df_carga_anio[['DOMINIO','MES_STR','PESO_TON']].copy()
-    tonkml_mes=km_lts_mes.merge(df_carga_str,on=['DOMINIO','MES_STR'],how='left')
-    tonkml_mes['PESO_TON']=tonkml_mes['PESO_TON'].fillna(0)
-    tonkml_mes['TONKML']=np.where((tonkml_mes['PESO_TON']>0)&(tonkml_mes['LITROS']>0),(tonkml_mes['PESO_TON']*tonkml_mes['KM'])/tonkml_mes['LITROS'],np.nan).round(2)
+    if df_viajes_ier is not None and not df_viajes_ier.empty:
+        _tv=df_viajes_ier[df_viajes_ier['DOMINIO'].isin(_patentes_ld)].copy()
+        _tv['MES_STR']=_tv['MES'].astype(str)
+        _tv=_tv.groupby(['DOMINIO','MES_STR'])['PESO_TON'].mean().rename('TON_VIAJE').reset_index()
+    else:
+        _tv=pd.DataFrame(columns=['DOMINIO','MES_STR','TON_VIAJE'])
+    tonkml_mes=km_lts_mes.merge(_tv,on=['DOMINIO','MES_STR'],how='inner')
+    tonkml_mes['TONKML']=np.where((tonkml_mes['TON_VIAJE']>0)&(tonkml_mes['LITROS']>0),(tonkml_mes['TON_VIAJE']*tonkml_mes['KM'])/tonkml_mes['LITROS'],np.nan).round(2)
     tonkml_mes['MODELO']=tonkml_mes['DOMINIO'].apply(asignar_modelo)
     tkml_valid=tonkml_mes['TONKML'].dropna()
     if not tkml_valid.empty:
@@ -2381,8 +2409,9 @@ elif pg == "Datos Operativos":
         legend=dict(bgcolor='rgba(15,23,42,0.8)',bordercolor='#334155',borderwidth=1,orientation='h',yanchor='bottom',y=1.02,xanchor='right',x=1),
         height=400,margin=dict(l=10,r=10,t=50,b=50))
     st.plotly_chart(fig_tkml, use_container_width=True)
-    rank_tkml=tonkml_mes.groupby('DOMINIO').agg(PESO_TON=('PESO_TON','sum'),KM=('KM','sum'),LITROS=('LITROS','sum'),MODELO=('MODELO','first')).reset_index()
-    rank_tkml['TONKML_ANUAL']=np.where((rank_tkml['PESO_TON']>0)&(rank_tkml['LITROS']>0),(rank_tkml['PESO_TON']*rank_tkml['KM'])/rank_tkml['LITROS'],np.nan).round(2)
+    _tm_ok=tonkml_mes[tonkml_mes['TONKML'].notna()].assign(TKM=lambda d:d['TON_VIAJE']*d['KM'])
+    rank_tkml=_tm_ok.groupby('DOMINIO').agg(TKM=('TKM','sum'),LITROS=('LITROS','sum'),MODELO=('MODELO','first')).reset_index()
+    rank_tkml['TONKML_ANUAL']=np.where(rank_tkml['LITROS']>0,rank_tkml['TKM']/rank_tkml['LITROS'],np.nan).round(2)
     rank_tkml=rank_tkml[rank_tkml['TONKML_ANUAL'].notna()].sort_values('TONKML_ANUAL',ascending=True)
     if not rank_tkml.empty:
         fig_rank=go.Figure([go.Bar(y=rank_tkml['DOMINIO'],x=rank_tkml['TONKML_ANUAL'],orientation='h',
@@ -2392,7 +2421,7 @@ elif pg == "Datos Operativos":
         prom_r=rank_tkml['TONKML_ANUAL'].mean()
         fig_rank.add_vline(x=prom_r,line_dash='dot',line_color='#f59e0b',line_width=2,annotation_text=f'Prom: {prom_r:.2f}',annotation_position='top',annotation_font_color='#fbbf24',annotation_font_size=11)
         fig_rank.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(30,41,59,0.6)',font=dict(color='#e2e8f0'),
-            xaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8'),title=dict(text='ton·km/L acumulado año',font=dict(color='#94a3b8'))),
+            xaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8'),title=dict(text='ton·km/L del período',font=dict(color='#94a3b8'))),
             yaxis=dict(gridcolor='#334155',tickfont=dict(color='#94a3b8',size=10)),
             height=max(300,len(rank_tkml)*50+80),margin=dict(l=10,r=120,t=30,b=30),showlegend=False)
         st.plotly_chart(fig_rank, use_container_width=True)
